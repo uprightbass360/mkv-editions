@@ -112,7 +112,7 @@ def load_editions(bdmv, eds):
 # flat mode: one self-contained, server-playable file per edition
 # ----------------------------------------------------------------------------
 def build_flat(bdmv, out_dir, title, editions):
-    stream = os.path.join(bdmv, "STREAM")
+    stream = os.path.abspath(os.path.join(bdmv, "STREAM"))  # absolute: build.sh runs from out_dir
     lines = ["#!/usr/bin/env bash", "set -euo pipefail", "",
              "# flat mode: each cut is a real linear track -> plays on Plex/Jellyfin/Emby.",
              "# Shared video is duplicated across files (unavoidable for ffmpeg players).", ""]
@@ -134,7 +134,7 @@ def build_flat(bdmv, out_dir, title, editions):
 # linked mode: mpv-only, space-efficient ordered-chapters / segment linking
 # ----------------------------------------------------------------------------
 def build_linked(bdmv, out_dir, title, editions):
-    stream = os.path.join(bdmv, "STREAM")
+    stream = os.path.abspath(os.path.join(bdmv, "STREAM"))  # absolute: build.sh runs from out_dir
     clips, order = {}, []
     for _n, items in editions:
         for clip, in_t, out_t in items:

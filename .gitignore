@@ -1,5 +1,7 @@
 # generator output
 out/
+sample/
+*.m2ts
 *.mkv
 chapters.xml
 build.sh

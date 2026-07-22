@@ -251,6 +251,30 @@ a playlist references, in what order* — exactly what the `.mpls` provides. (Th
 whole-clip caveat above still applies to partial references; reordering/adding whole
 clips is always safe.)
 
+## Validate with a generated sample (no disc needed)
+
+Commercial seamless-branching discs are copyrighted, so `samples/make-sample.py`
+builds a **synthetic** decrypted BDMV instead — short numbered/coloured clips, each
+with a distinct tone, and two playlists that exercise swap + addition + reorder at once:
+
+    Theatrical (00001.mpls): 1 2 3 4 5
+    Extended   (00002.mpls): 1 2 11 4 12 5 13     # 3->11 swapped, 12 & 13 added
+
+    python3 samples/make-sample.py ./sample        # needs ffmpeg
+    ./mkv-editions.sh ./sample/BDMV ./out --title Sample \
+        "Theatrical=00001.mpls" "Extended=00002.mpls"
+    cd out && bash build.sh
+
+Verified end-to-end with **ffmpeg 6.1 + mkvmerge v82**:
+- **flat** → Theatrical 20.0 s, Extended 30.1 s (genuinely different-length cuts, with a
+  scene chapter at each join). Both play in anything.
+- **linked** → husk + 8 segment files, 2 ordered editions, 12 `ChapterSegmentUID` links,
+  each resolving to the matching segment file's real `SegmentUID` (so mpv assembles both cuts).
+
+Note on the element name: the current Matroska spec renamed the *binary* element to
+`ChapterSegmentUUID`, but MKVToolNix's chapter **XML** still uses `ChapterSegmentUID`
+(confirmed round-tripping through mkvmerge v82) — which is exactly what the generator emits.
+
 ## Why this is still a hack: the chicken-and-egg problem
 
 Editioned/branched MKVs remain a niche curiosity rather than a solved feature, and
