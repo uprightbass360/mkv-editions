@@ -212,6 +212,11 @@ dependencies (`mkvmerge`, `ffprobe`, `python3`):
     ./mkv-editions.sh /mnt/backup/BDMV ./out --mode linked --title "Fellowship" \
         "Theatrical Cut=00001.mpls" "Extended Cut=00002.mpls"
 
+    # 3c. add real disc chapters + a re-encode seam list:
+    ./mkv-editions.sh /mnt/backup/BDMV ./out --title "Fellowship" \
+        --preserve-chapters --qpfile \
+        "Theatrical Cut=00001.mpls" "Extended Cut=00002.mpls"
+
     # 4. Build:
     cd out && bash build.sh
 
@@ -220,8 +225,25 @@ tag is Plex's native Editions convention (Jellyfin/Emby group alternate versions
 same way). Scene chapters are added at each append point. Plays in anything.
 
 **linked** produces `Fellowship.mkv` (husk) + `segNNNNN.mkv` (one per unique clip,
-SegmentUID = `%032x` of the clip number) + `chapters.xml` (one ordered `<EditionEntry>`
-per playlist). Play with `mpv Fellowship.mkv --edition=0|1`.
+SegmentUID = `%032x` of the clip number) + `chapters.xml` (ordered `<EditionEntry>` per
+playlist) + `tags.xml` (edition names). Play with `mpv Fellowship.mkv --edition=0|1`.
+
+### Options (sniped from [Xin1Generator](https://code.google.com/archive/p/xin1generator))
+
+- **`--preserve-chapters`** — reads the disc's chapter marks from the `.mpls`
+  **PlayListMark** table and emits them as real chapters. In `flat` mode they become
+  ordinary chapter stops on the concatenated timeline; in `linked` mode the disc
+  chapters are *visible* while the segment-join atoms are *hidden* (`ChapterFlagHidden`),
+  so you get proper chapter navigation without the joins cluttering the menu.
+- **`--qpfile`** (flat) — writes `<title>.<Edition>.qpfile.txt`, forcing an IDR frame
+  at each segment seam (`<frame> I`, valid for **both** x264 and x265 `--qpfile`). Use
+  it if you re-encode a flat edition, so cuts stay seamless: `x265 --qpfile … in.y4m`.
+- **Edition names** — `linked` mode writes `EditionDisplay/EditionString` *and* a
+  `tags.xml` TITLE per edition. (mpv 0.37 ignores both and selects editions by index,
+  but MPC-HC/LAV, mkvtoolnix GUI and Jellyfin read them.)
+- **Frame-exact boundaries** — chapter end times are computed from exact frame count ÷
+  frame rate (via ffprobe), not container duration, so splice points land on real frame
+  boundaries. Falls back to container duration if a stream lacks a frame count.
 
 Assumptions / when to intervene (linked mode):
 - Assumes each PlayItem uses the WHOLE clip (start 0 -> duration). True for real
@@ -260,16 +282,22 @@ with a distinct tone, and two playlists that exercise swap + addition + reorder 
     Theatrical (00001.mpls): 1 2 3 4 5
     Extended   (00002.mpls): 1 2 11 4 12 5 13     # 3->11 swapped, 12 & 13 added
 
+The sample also embeds a `PlayListMark` chapter 2 s into every segment, so
+`--preserve-chapters` has real marks to read.
+
     python3 samples/make-sample.py ./sample        # needs ffmpeg
     ./mkv-editions.sh ./sample/BDMV ./out --title Sample \
         "Theatrical=00001.mpls" "Extended=00002.mpls"
     cd out && bash build.sh
 
-Verified end-to-end with **ffmpeg 6.1 + mkvmerge v82**:
-- **flat** → Theatrical 20.0 s, Extended 30.1 s (genuinely different-length cuts, with a
-  scene chapter at each join). Both play in anything.
+Verified end-to-end with **ffmpeg 6.1 + mkvmerge v82 + mpv 0.37**:
+- **flat** → Theatrical 20.0 s, Extended 30.1 s (genuinely different-length cuts). Plays anywhere.
 - **linked** → husk + 8 segment files, 2 ordered editions, 12 `ChapterSegmentUID` links,
-  each resolving to the matching segment file's real `SegmentUID` (so mpv assembles both cuts).
+  each resolving to the matching segment's real `SegmentUID`; mpv assembles both cuts and a
+  screenshot at t=10 s shows `SEG 00003` (theatrical) vs `SEG 00011` (extended).
+- **`--preserve-chapters`** → flat cuts get 8/10 chapters at the mark positions; linked cuts
+  interleave visible disc chapters with hidden segment joins (first chapter visible at 0).
+- **`--qpfile`** → Extended seam list `96 192 312 408 528 624` = exact frame joins at 24 fps.
 
 Note on the element name: the current Matroska spec renamed the *binary* element to
 `ChapterSegmentUUID`, but MKVToolNix's chapter **XML** still uses `ChapterSegmentUID`
@@ -321,3 +349,17 @@ Only two things, neither likely:
 Until then the pragmatic answer stands: **mpv for the real branched experience,
 flat duplicated files (`--mode flat`) for everything else.** This toolkit just makes
 both cheap to produce — it can't vote ffmpeg a new feature.
+
+## Credits
+
+- **[Xin1Generator](https://code.google.com/archive/p/xin1generator)** (Sander, ~2011) —
+  the original seamless-branching-to-Matroska tool. This project reads `.mpls` directly
+  (it wrapped eac3to/xport) and targets flat + linked output rather than its append
+  approach, but the chapter-preservation, qpfile, edition-naming and frame-exact-boundary
+  ideas are sniped from it.
+- **["101 things you never knew you could do with Matroska"](https://mod16.org/hurfdurf/?p=8)**
+  (TheFluff, 2007) — the definitive explainer of editions, ordered chapters and segment
+  linking. Concepts still current; its 2007 tooling/player advice is not.
+- **[Matroska chapter spec](https://www.matroska.org/technical/chapters.html)** — the
+  authoritative reference (note: binary element is now `ChapterSegmentUUID`; mkvmerge XML
+  still uses `ChapterSegmentUID`).

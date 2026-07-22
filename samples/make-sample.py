@@ -62,16 +62,30 @@ def make_segment(path, seg_id, tag, colour, dur, hz):
 
 
 def write_mpls(path, clips, durs):
-    """Minimal MPLS: PlayItems with clip name + IN=0 + OUT=duration (45 kHz)."""
+    """Minimal MPLS with PlayItems (IN=0, OUT=duration) and a chapter mark 2s
+    into each segment (PlayListMark), so --preserve-chapters has data to read."""
     items = b""
     for c in clips:
         out_t = int(durs[c] * 45000)
         it = (c.encode() + b"M2TS" + b"\x00\x00" + b"\x00"
               + struct.pack(">I", 0) + struct.pack(">I", out_t) + b"\x00" * 6)
         items += struct.pack(">H", len(it)) + it
-    after = struct.pack(">H", 0) + struct.pack(">H", len(clips)) + struct.pack(">H", 0) + items
-    data = b"MPLS0200" + struct.pack(">I", 40) + b"\x00" * 28 + struct.pack(">I", len(after)) + after
-    open(path, "wb").write(data)
+    pl_after = struct.pack(">H", 0) + struct.pack(">H", len(clips)) + struct.pack(">H", 0) + items
+    playlist_block = struct.pack(">I", len(pl_after)) + pl_after
+
+    marks = [(i, 2 * 45000) for i in range(len(clips))]   # 2s into each PlayItem
+    entries = b""
+    for pi, ts in marks:
+        entries += (b"\x00" + b"\x01" + struct.pack(">H", pi)      # reserved, type=chapter, ref
+                    + struct.pack(">I", ts) + b"\x00\x00" + struct.pack(">I", 0))
+    mk_after = struct.pack(">H", len(marks)) + entries
+    mark_block = struct.pack(">I", len(mk_after)) + mk_after
+
+    pl_addr = 40
+    mark_addr = pl_addr + len(playlist_block)
+    header = (b"MPLS0200" + struct.pack(">I", pl_addr) + struct.pack(">I", mark_addr)
+              + struct.pack(">I", 0) + b"\x00" * 20)          # 40-byte header
+    open(path, "wb").write(header + playlist_block + mark_block)
 
 
 def main():
