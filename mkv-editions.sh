@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# mkv-editions.sh — dependency check + convenience wrapper for src/gen-editions.py
+# mkv-editions.sh - dependency check + convenience wrapper for src/gen-editions.py
 #
 # Usage:
 #   ./mkv-editions.sh [--install-deps] <BDMV_dir> <out_dir> \
@@ -11,9 +11,9 @@
 #   --install-deps   install any missing dependencies, then continue
 #   MKVED_AUTO_INSTALL=1  same, via env var (useful in scripts)
 #
-# Required: python3, mkvmerge (mkvtoolnix), ffprobe (ffmpeg) — used in BOTH modes
+# Required: python3, mkvmerge (mkvtoolnix), ffprobe (ffmpeg) - used in BOTH modes
 #   (frame-exact boundaries + durations). build.sh itself only calls mkvmerge.
-# Optional: x264 and/or x265 — ONLY to re-encode a flat edition using the
+# Optional: x264 and/or x265 - ONLY to re-encode a flat edition using the
 #   --qpfile output. Not run by this tool, so they are not auto-installed.
 #
 set -euo pipefail

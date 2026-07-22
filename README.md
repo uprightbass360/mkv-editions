@@ -9,7 +9,7 @@ Tarulia's example segment layout:
 
 Shared: 01,02,04,05,06,08,10 · Theatrical-only: 03,07,09 · Extended-only: 11,12,13
 
-## Step 1 — remux each segment to its own MKV with a FIXED SegmentUID
+## Step 1 - remux each segment to its own MKV with a FIXED SegmentUID
 
 The SegmentUID is how the chapter file addresses each piece, so it must be
 deterministic (don't let mkvmerge randomise it).
@@ -35,14 +35,14 @@ Get each segment's exact duration for the ChapterTimeEnd values:
     mkvmerge -J seg01.mkv | jq -r '.container.properties.duration'   # ns
     # or: ffprobe -v0 -show_entries format=duration -of csv=p=0 seg01.mkv
 
-## Step 2 — chapters.xml with two ORDERED editions
+## Step 2 - chapters.xml with two ORDERED editions
 
 - `EditionFlagOrdered = 1`  → play ONLY the listed atoms, in listed order.
 - `ChapterSegmentUID`       → pull this atom's frames from that external file.
 - `ChapterTimeStart/End`    → the in/out point inside the linked segment
                               (00:00:00 → full duration = "use the whole clip").
 
-Times below are placeholders — replace End with each clip's real duration.
+Times below are placeholders - replace End with each clip's real duration.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -151,7 +151,7 @@ Times below are placeholders — replace End with each clip's real duration.
 </Chapters>
 ```
 
-## Step 3 — build the master "playlist" file
+## Step 3 - build the master "playlist" file
 
 The master carries the editions and links to every segment. Give it its own UID
 and make seg01 (the common opening) its body so players have a valid first segment:
@@ -169,20 +169,20 @@ Keep `seg01.mkv … seg13.mkv` in the SAME folder as `LOTR.mkv`. mpv resolves th
 - Splices are frame-accurate on seamless-branching discs, so stream-copy joins cleanly.
 - Player support: mpv = good; VLC/most others ignore ordered editions and just play the master.
 - Alternative (max compatibility): drop linking, `mkvmerge -o extended.mkv seg01 + seg02 + seg11 ...`
-  to hard-concatenate each edition — simple, plays everywhere, but duplicates the shared segments.
+  to hard-concatenate each edition - simple, plays everywhere, but duplicates the shared segments.
 - The whole point of linking: shared segments stored once. Two editions ≈ one movie's worth of bytes.
 
 ## Which mode do you want? (read this first)
 
 The whole design hinges on one fact: **ffmpeg honors neither ordered chapters nor
 segment linking.** It plays the linear default track and nothing else. Plex,
-Jellyfin, and Emby all analyze/transcode through ffmpeg — so *only mpv* (which
+Jellyfin, and Emby all analyze/transcode through ffmpeg - so *only mpv* (which
 ships its own Matroska demuxer) can assemble a branched cut. That forces a choice:
 
 | Approach | What a media server actually plays | Space | Verdict |
 |---|---|---|---|
-| **Xin1** — scenes appended to one track, chapters seek back/forth | theatrical, then extended scenes dumped out-of-context at the end | 1× + scenes | runtime **skewed**, garbage tail; extended cut mpv-only |
-| **Two video tracks** — theatrical=trk1, extended=trk2 | default track only (theatrical) | ~2× | no auto-branching anywhere; server can't reach trk2 |
+| **Xin1** - scenes appended to one track, chapters seek back/forth | theatrical, then extended scenes dumped out-of-context at the end | 1× + scenes | runtime **skewed**, garbage tail; extended cut mpv-only |
+| **Two video tracks** - theatrical=trk1, extended=trk2 | default track only (theatrical) | ~2× | no auto-branching anywhere; server can't reach trk2 |
 | **Ordered chapters** (`--mode linked`) | theatrical husk, *correct* | 1× + scenes | extended cut **mpv-only**; scene files clutter the scanner |
 | **Flat files** (`--mode flat`, default) | every cut, *correctly* | N× (dup) | **plays everywhere**; shared video duplicated on disk |
 
@@ -194,7 +194,7 @@ timeline existing somewhere. So:
 - **Both cuts must play on Plex/Jellyfin/Emby** → `--mode flat` (duplicates shared video).
 - **Space-efficient archive, full experience in mpv** → `--mode linked`.
 
-## Step 4 — auto-generate it from the disc (`gen-editions.py`)
+## Step 4 - auto-generate it from the disc (`gen-editions.py`)
 
 `src/gen-editions.py` reads the on-disc `.mpls` play order and writes a `build.sh`.
 It parses the MPLS PlayItem list directly (no libbluray/mpls_dump needed); MPLS
@@ -204,11 +204,11 @@ dependencies (`mkvmerge`, `ffprobe`, `python3`):
     # 1. MakeMKV -> Backup mode -> decrypted BDMV/ (contains PLAYLIST/ + STREAM/)
     # 2. Identify the playlists (MakeMKV title info / bdinfo shows the .mpls names)
 
-    # 3a. FLAT (default) — server-ready, one self-contained file per edition:
+    # 3a. FLAT (default) - server-ready, one self-contained file per edition:
     ./mkv-editions.sh --install-deps /mnt/backup/BDMV ./out --title "Fellowship" \
         "Theatrical Cut=00001.mpls" "Extended Cut=00002.mpls"
 
-    # 3b. LINKED — mpv-only, space-efficient:
+    # 3b. LINKED - mpv-only, space-efficient:
     ./mkv-editions.sh /mnt/backup/BDMV ./out --mode linked --title "Fellowship" \
         "Theatrical Cut=00001.mpls" "Extended Cut=00002.mpls"
 
@@ -220,7 +220,7 @@ dependencies (`mkvmerge`, `ffprobe`, `python3`):
     # 4. Build:
     cd out && bash build.sh
 
-**flat** produces `Fellowship {edition-Theatrical Cut}.mkv` etc. — the `{edition-…}`
+**flat** produces `Fellowship {edition-Theatrical Cut}.mkv` etc. - the `{edition-…}`
 tag is Plex's native Editions convention (Jellyfin/Emby group alternate versions the
 same way). Scene chapters are added at each append point. Plays in anything.
 
@@ -230,53 +230,53 @@ playlist) + `tags.xml` (edition names). Play with `mpv Fellowship.mkv --edition=
 
 ### Options (sniped from [Xin1Generator](https://code.google.com/archive/p/xin1generator))
 
-- **`--preserve-chapters`** — reads the disc's chapter marks from the `.mpls`
+- **`--preserve-chapters`** - reads the disc's chapter marks from the `.mpls`
   **PlayListMark** table and emits them as real chapters. In `flat` mode they become
   ordinary chapter stops on the concatenated timeline; in `linked` mode the disc
   chapters are *visible* while the segment-join atoms are *hidden* (`ChapterFlagHidden`),
   so you get proper chapter navigation without the joins cluttering the menu.
-- **`--qpfile`** (flat) — writes `<title>.<Edition>.qpfile.txt`, forcing an IDR frame
+- **`--qpfile`** (flat) - writes `<title>.<Edition>.qpfile.txt`, forcing an IDR frame
   at each segment seam (`<frame> I`, valid for **both** x264 and x265 `--qpfile`). Use
   it if you re-encode a flat edition, so cuts stay seamless: `x265 --qpfile … in.y4m`.
-- **Edition names** — `linked` mode writes `EditionDisplay/EditionString` *and* a
+- **Edition names** - `linked` mode writes `EditionDisplay/EditionString` *and* a
   `tags.xml` TITLE per edition. (mpv 0.37 ignores both and selects editions by index,
   but MPC-HC/LAV, mkvtoolnix GUI and Jellyfin read them.)
-- **Frame-exact boundaries** — chapter end times are computed from exact frame count ÷
+- **Frame-exact boundaries** - chapter end times are computed from exact frame count ÷
   frame rate (via ffprobe), not container duration, so splice points land on real frame
   boundaries. Falls back to container duration if a stream lacks a frame count.
 
 Assumptions / when to intervene (linked mode):
 - Assumes each PlayItem uses the WHOLE clip (start 0 -> duration). True for real
   seamless-branching discs. If a playlist references only a sub-range, the script
-  still writes a whole-clip atom but prints a `WARNING` naming that clip — fix its
+  still writes a whole-clip atom but prints a `WARNING` naming that clip - fix its
   `ChapterTimeStart/End` by hand (the .mpls alone lacks the clip's first-PTS offset).
 - Keep all `segNNNNN.mkv` beside `Fellowship.mkv`; mpv resolves the links by scanning
-  siblings. Don't point a media server at this folder — it can't assemble editions.
-- More editions? Pass more `"Name=playlist.mpls"` args — one ordered edition each.
+  siblings. Don't point a media server at this folder - it can't assemble editions.
+- More editions? Pass more `"Name=playlist.mpls"` args - one ordered edition each.
 
 ### Any edition structure is supported (not just 1:1 swaps)
 
 There's no "swap skeleton" assumption. Each edition is just *its own* playlist's clip
-list, in *its own* order, so all of these work — including combinations:
+list, in *its own* order, so all of these work - including combinations:
 
-- **Swapped segments** — theatrical `0003` replaced by extended `0011` at the same slot.
-- **Purely additional segments** — extended has 13 where theatrical had 10; segments
+- **Swapped segments** - theatrical `0003` replaced by extended `0011` at the same slot.
+- **Purely additional segments** - extended has 13 where theatrical had 10; segments
   that never appear in the theatrical cut are picked up fine.
-- **Reordered segments** — same clips in a different order, e.g. `0001 0002 0003`
+- **Reordered segments** - same clips in a different order, e.g. `0001 0002 0003`
   vs `0001 0003 0002`.
-- **Repeated segments** — a clip referenced more than once, at any position.
+- **Repeated segments** - a clip referenced more than once, at any position.
 
 In `flat` mode each edition is appended in its own play order; in `linked` mode the
 script takes the **union** of unique clip ids (remuxed once), then each edition emits
 ordered-chapter atoms in its own order. The only thing that matters is *which clip ids
-a playlist references, in what order* — exactly what the `.mpls` provides. (The
+a playlist references, in what order* - exactly what the `.mpls` provides. (The
 whole-clip caveat above still applies to partial references; reordering/adding whole
 clips is always safe.)
 
 ## Validate with a generated sample (no disc needed)
 
 Commercial seamless-branching discs are copyrighted, so `samples/make-sample.py`
-builds a **synthetic** decrypted BDMV instead — short numbered/coloured clips, each
+builds a **synthetic** decrypted BDMV instead - short numbered/coloured clips, each
 with a distinct tone, and two playlists that exercise swap + addition + reorder at once:
 
     Theatrical (00001.mpls): 1 2 3 4 5
@@ -299,16 +299,16 @@ Verified end-to-end with **ffmpeg 6.1 + mkvmerge v82 + mpv 0.37**:
   interleave visible disc chapters with hidden segment joins (first chapter visible at 0).
 - **`--qpfile`** → Extended seam list `96 192 312 408 528 624` = exact frame joins at 24 fps.
   Fed through **x264 0.164 and x265 3.5** (`--qpfile`), both accept the format and place IDR
-  frames at exactly `0 96 192 312 408 528 624` — seams land on keyframes, so re-encoded cuts stay seamless.
+  frames at exactly `0 96 192 312 408 528 624` - seams land on keyframes, so re-encoded cuts stay seamless.
 
 Note on the element name: the current Matroska spec renamed the *binary* element to
 `ChapterSegmentUUID`, but MKVToolNix's chapter **XML** still uses `ChapterSegmentUID`
-(confirmed round-tripping through mkvmerge v82) — which is exactly what the generator emits.
+(confirmed round-tripping through mkvmerge v82) - which is exactly what the generator emits.
 
 ## Why this is still a hack: the chicken-and-egg problem
 
 Editioned/branched MKVs remain a niche curiosity rather than a solved feature, and
-it's not an accident — it's a self-reinforcing deadlock:
+it's not an accident - it's a self-reinforcing deadlock:
 
     no authoring tools  <-- no player support  <-- no media uses it  <-- no authoring tools
 
@@ -317,13 +317,13 @@ Each link starves the next:
 - **Players don't implement it** because almost no one's library contains branched
   MKVs, so there's no demand to justify the engineering.
 - **Nobody authors branched MKVs** because they won't play in the tools people
-  actually use — so why produce them?
+  actually use - so why produce them?
 - **No automated authoring tool exists** for the same reason: a tool whose output
   chokes 95% of players has no audience.
 
 ### ffmpeg is the keystone
 
-Ordered chapters and segment linking aren't missing from "some players" — they're
+Ordered chapters and segment linking aren't missing from "some players" - they're
 missing from **ffmpeg's Matroska demuxer (libavformat)**, and that's the whole
 ballgame. Jellyfin, Plex, Emby, Kodi, VLC, HandBrake and most transcoders demux
 through libavformat. So one absent feature in one library silently vetoes the entire
@@ -343,25 +343,25 @@ controlled its own demuxer. Everywhere else it dead-ended at the shared library.
 
 Only two things, neither likely:
 
-1. **ffmpeg implements ordered chapters in libavformat** — this unblocks the whole
+1. **ffmpeg implements ordered chapters in libavformat** - this unblocks the whole
    downstream ecosystem in one stroke, but faces near-zero demand pressure (the
    chicken-and-egg again).
 2. **Enough people hand-author these** that demand becomes visible to player devs.
 
 Until then the pragmatic answer stands: **mpv for the real branched experience,
 flat duplicated files (`--mode flat`) for everything else.** This toolkit just makes
-both cheap to produce — it can't vote ffmpeg a new feature.
+both cheap to produce - it can't vote ffmpeg a new feature.
 
 ## Credits
 
-- **[Xin1Generator](https://code.google.com/archive/p/xin1generator)** (Sander, ~2011) —
+- **[Xin1Generator](https://code.google.com/archive/p/xin1generator)** (Sander, ~2011) -
   the original seamless-branching-to-Matroska tool. This project reads `.mpls` directly
   (it wrapped eac3to/xport) and targets flat + linked output rather than its append
   approach, but the chapter-preservation, qpfile, edition-naming and frame-exact-boundary
   ideas are sniped from it.
 - **["101 things you never knew you could do with Matroska"](https://mod16.org/hurfdurf/?p=8)**
-  (TheFluff, 2007) — the definitive explainer of editions, ordered chapters and segment
+  (TheFluff, 2007) - the definitive explainer of editions, ordered chapters and segment
   linking. Concepts still current; its 2007 tooling/player advice is not.
-- **[Matroska chapter spec](https://www.matroska.org/technical/chapters.html)** — the
+- **[Matroska chapter spec](https://www.matroska.org/technical/chapters.html)** - the
   authoritative reference (note: binary element is now `ChapterSegmentUUID`; mkvmerge XML
   still uses `ChapterSegmentUID`).

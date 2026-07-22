@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-gen-editions.py — build editioned MKVs from a decrypted BD backup by reading
+gen-editions.py - build editioned MKVs from a decrypted BD backup by reading
 the on-disc .mpls play order (and chapter marks).
 
 MODES
@@ -189,7 +189,7 @@ def gather_clips(stream, editions):
 
 
 # ---------------------------------------------------------------------------
-# simple (non-ordered) chapters XML — used by flat --preserve-chapters
+# simple (non-ordered) chapters XML - used by flat --preserve-chapters
 # ---------------------------------------------------------------------------
 def simple_chapters_xml(positions):
     x = ['<?xml version="1.0" encoding="UTF-8"?>',
@@ -273,7 +273,7 @@ def build_linked(stream, out_dir, title, editions, clipinfo, preserve):
             if abs(span - clipinfo[c][3]) > 500_000_000:
                 warnings.append(
                     f"clip {c}: playlist references only {fmt_ns(span)} of a "
-                    f"{fmt_ns(clipinfo[c][3])} clip — atom uses WHOLE clip; fix by hand.")
+                    f"{fmt_ns(clipinfo[c][3])} clip - atom uses WHOLE clip; fix by hand.")
 
     def atom(clip, start, end, hidden, name):
         a = ["    <ChapterAtom>",
@@ -359,7 +359,7 @@ def main():
         summary = "\n".join(f"  {o}" for o in outputs)
     else:
         script, warnings = build_linked(stream, out_dir, title, editions, clipinfo, preserve)
-        summary = f"  {title}.mkv (+ seg*.mkv, chapters.xml, tags.xml) — mpv only"
+        summary = f"  {title}.mkv (+ seg*.mkv, chapters.xml, tags.xml) - mpv only"
 
     with open(os.path.join(out_dir, "build.sh"), "w") as f:
         f.write(script)
@@ -370,7 +370,7 @@ def main():
         f"{n} ({len(i)} segs, {len(m)} marks)" for n, i, m in editions))
     print(f"wrote {out_dir}/build.sh -> produces:\n{summary}")
     if qpfile and mode == "flat":
-        print("  qpfile(s) written — consume only if you RE-ENCODE a cut:")
+        print("  qpfile(s) written - consume only if you RE-ENCODE a cut:")
         print("    x264 --qpfile <file>.qpfile.txt ...   |   x265 --qpfile <file>.qpfile.txt ...")
     for w in warnings:
         print("  ! " + w)

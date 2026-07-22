@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-make-sample.py — generate a synthetic, decrypted-BD-style sample tree for
+make-sample.py - generate a synthetic, decrypted-BD-style sample tree for
 validating gen-editions.py. No copyrighted material: every segment is a short
 solid-colour clip with its number burned in, plus a distinct sine tone.
 
