@@ -10,16 +10,23 @@ MODES
           "<title> {edition-Name}.mkv".
   linked  Space-efficient, mpv-ONLY. Husk + external per-segment files joined by
           ordered chapters / segment linking. Shared segments stored once.
+  xin1    Single "<title>.mkv": every unique clip appended once, each edition an
+          ordered-chapter timeline seeking inside that one file. Alternate cuts
+          are mpv-only; other players see the raw concatenation (skewed runtime).
+
+Multi-angle playlists (discs that branch via angles instead of separate
+playlists) auto-expand: "Name=pl.mpls" with N angles yields N editions -
+"Name", "Name (Angle 2)", ...
 
 OPTIONS
   --title NAME           base output name (default "movie")
   --preserve-chapters    read the disc's chapter marks (.mpls PlayListMark) and
                          emit them as real chapters in each edition
-  --qpfile               (flat) emit an x264/x265 --qpfile forcing IDR frames at
-                         each segment join, for seamless re-encoding
+  --qpfile               (flat/xin1) emit an x264/x265 --qpfile forcing IDR
+                         frames at each segment join, for seamless re-encoding
 
 USAGE
-  gen-editions.py <BDMV_dir> <out_dir> [--mode flat|linked] [--title NAME]
+  gen-editions.py <BDMV_dir> <out_dir> [--mode flat|linked|xin1] [--title NAME]
                   [--preserve-chapters] [--qpfile]
                   "<Edition Name>=<playlist.mpls>" [ ... ]
 
@@ -28,19 +35,24 @@ parsed directly (no libbluray/mpls_dump needed); MPLS timestamps are 45 kHz.
 """
 
 import os
+import random
 import sys
 import shlex
 import subprocess
+from collections import namedtuple
 
 TICKS = 45000  # MPLS timestamps are 45 kHz
 NS = 1_000_000_000
+
+ClipInfo = namedtuple("ClipInfo", "frames num den dur codec")
 
 
 # ---------------------------------------------------------------------------
 # .mpls parsing (PlayItems + chapter marks)
 # ---------------------------------------------------------------------------
 def parse_mpls(path):
-    """Return (items, marks): items=[(clip,in,out)], marks=[(playitem_idx,ts)]."""
+    """Return (items, marks): items=[(clips,in,out)] with one clip id per angle
+    (clips[0] = base angle), marks=[(playitem_idx,ts)]."""
     data = open(path, "rb").read()
     if data[0:4] != b"MPLS":
         sys.exit(f"{path}: not an MPLS file")
@@ -52,7 +64,12 @@ def parse_mpls(path):
     for _ in range(n_items):
         length = int.from_bytes(data[pos:pos + 2], "big")
         it = data[pos + 2:pos + 2 + length]
-        items.append((it[0:5].decode("ascii"),
+        clips = [it[0:5].decode("ascii")]
+        if (it[10] >> 4) & 1:                    # is_multi_angle
+            for a in range(it[32] - 1):          # entries: clip(5)+codec(4)+stc(1)
+                off = 34 + 10 * a
+                clips.append(it[off:off + 5].decode("ascii"))
+        items.append((clips,
                       int.from_bytes(it[12:16], "big"),
                       int.from_bytes(it[16:20], "big")))
         pos += 2 + length
@@ -79,6 +96,11 @@ def uid_for(clip_id):
     return "%032x" % int(clip_id)
 
 
+def uid():
+    """Random nonzero 64-bit Edition UID (unique across files, per spec)."""
+    return random.randrange(1, 1 << 64)
+
+
 def fmt_ns(ns):
     s, ns = divmod(int(ns), NS)
     h, s = divmod(s, 3600)
@@ -94,12 +116,12 @@ def ffprobe_duration_ns(path):
 
 
 def frame_info(path):
-    """(frames|None, fps_num, fps_den). Uses container metadata; counts only if needed."""
+    """(codec, frames|None, fps_num, fps_den). Container metadata; counts only if needed."""
     def probe(extra):
         return subprocess.check_output(
             ["ffprobe", "-v", "0", "-select_streams", "v:0"] + extra + [path]).decode()
     d = dict(l.split("=", 1) for l in probe(
-        ["-show_entries", "stream=r_frame_rate,nb_frames", "-of", "default=nw=1"]
+        ["-show_entries", "stream=codec_name,r_frame_rate,nb_frames", "-of", "default=nw=1"]
     ).splitlines() if "=" in l)
     rfr = (d.get("r_frame_rate", "0/1").split("/") + ["1"])[:2]
     num, den = int(rfr[0]), int(rfr[1] or 1)
@@ -109,7 +131,7 @@ def frame_info(path):
             ["-count_frames", "-show_entries", "stream=nb_read_frames", "-of", "default=nw=1"]
         ).splitlines() if "=" in l)
         nbf = d2.get("nb_read_frames", "N/A")
-    return (int(nbf) if nbf.isdigit() else None), num, den
+    return d.get("codec_name", ""), (int(nbf) if nbf.isdigit() else None), num, den
 
 
 def clip_duration_ns(frames, num, den, path):
@@ -124,7 +146,7 @@ def edition_mark_positions(items, marks, clipinfo):
     offsets, off = [], 0
     for clip, _i, _o in items:
         offsets.append(off)
-        off += clipinfo[clip][3]
+        off += clipinfo[clip].dur
     out = set()
     for pi, ts in marks:
         if pi >= len(items):
@@ -134,6 +156,62 @@ def edition_mark_positions(items, marks, clipinfo):
         if p > 0:
             out.add(p)
     return sorted(out)
+
+
+def unique_clips(editions):
+    """All clip ids across editions, first-appearance order."""
+    order, seen = [], set()
+    for _n, items, _m in editions:
+        for c, _i, _o in items:
+            if c not in seen:
+                seen.add(c)
+                order.append(c)
+    return order
+
+
+def write_qpfile(path, clips, clipinfo):
+    """Force an IDR at each clip join (cumulative frame numbers, x264/x265
+    --qpfile format). False if any clip's frame count is unknown."""
+    cum, joins = 0, []
+    for c in clips:
+        if clipinfo[c].frames is None:
+            return False
+        cum += clipinfo[c].frames
+        joins.append(cum)
+    # drop the final boundary (end of file)
+    open(path, "w").write("".join(f"{n} I\n" for n in joins[:-1]))
+    return True
+
+
+def vc1_warnings(clipinfo, mode):
+    """mkvmerge append skips one frame per splice on VC-1 (V_MS/VFW stores DTS;
+    decoder delay compensates once per file, not per splice - mkvtoolnix#6194).
+    linked mode never appends, so only flat/xin1 are affected."""
+    if mode == "linked":
+        return []
+    bad = sorted(c for c, ci in clipinfo.items() if ci.codec == "vc1")
+    if not bad:
+        return []
+    return [f"VC-1 video ({', '.join(bad)}): mkvmerge skips one frame per append "
+            "splice (mkvtoolnix#6194) - use --mode linked, which never appends."]
+
+
+def partial_clip_warnings(editions, clipinfo):
+    """(linked mode) A PlayItem spanning less than its whole clip needs its atom
+    fixed by hand. MPLS out_time is unreliable (aobikari's finding), so also
+    accept the span implied by the NEXT item's in_time before warning."""
+    warns = []
+    for _n, items, _m in editions:
+        for i, (c, in_t, out_t) in enumerate(items):
+            spans = {out_t - in_t}
+            if i + 1 < len(items):
+                spans.add(items[i + 1][1] - in_t)
+            if all(abs(s * NS / TICKS - clipinfo[c].dur) > 500_000_000 for s in spans):
+                warns.append(
+                    f"clip {c}: playlist references only "
+                    f"{fmt_ns(int((out_t - in_t) * NS / TICKS))} of a "
+                    f"{fmt_ns(clipinfo[c].dur)} clip - atom uses WHOLE clip; fix by hand.")
+    return warns
 
 
 # ---------------------------------------------------------------------------
@@ -161,18 +239,36 @@ def parse_args(argv):
             name, mpls = a.split("=", 1)
             eds.append((name, mpls)); i += 1; continue
         pos.append(a); i += 1
-    if len(pos) < 2 or not eds or mode not in ("flat", "linked"):
+    if len(pos) < 2 or not eds or mode not in ("flat", "linked", "xin1"):
         sys.exit(__doc__)
     return pos[0], pos[1], mode, title, preserve, qpfile, eds
 
 
 def load_editions(bdmv, eds):
+    """Parse each playlist; a multi-angle playlist expands to one edition per
+    angle (angle k plays each item's k-th clip, base clip where absent)."""
     out = []
     for name, mpls in eds:
         if not os.path.isabs(mpls) and not os.path.exists(mpls):
             mpls = os.path.join(bdmv, "PLAYLIST", mpls)
         items, marks = parse_mpls(mpls)
-        out.append((name, items, marks))
+        n_ang = max((len(clips) for clips, _i, _o in items), default=1)
+        if n_ang > 1:
+            print(f"  {name}: {n_ang} angles -> {n_ang} editions")
+            counts = {len(clips) for clips, _i, _o in items if len(clips) > 1}
+            if len(counts) > 1:
+                print(f"  ! {name}: inconsistent angle counts across PlayItems "
+                      f"({', '.join(map(str, sorted(counts)))}) - missing angles reuse the base clip")
+        valid = [(pi, ts) for pi, ts in marks if pi < len(items)]
+        if len(valid) != len(marks):
+            print(f"  ! {name}: {len(marks) - len(valid)} chapter mark(s) reference "
+                  "missing PlayItems - dropped")
+        marks = valid
+        for a in range(n_ang):
+            ed_name = name if a == 0 else f"{name} (Angle {a + 1})"
+            ed_items = [(clips[a] if a < len(clips) else clips[0], i, o)
+                        for clips, i, o in items]
+            out.append((ed_name, ed_items, marks))
     return out
 
 
@@ -183,15 +279,17 @@ def gather_clips(stream, editions):
             if clip in info:
                 continue
             path = os.path.join(stream, f"{clip}.m2ts")
-            fr, num, den = frame_info(path)
-            info[clip] = (fr, num, den, clip_duration_ns(fr, num, den, path))
+            codec, fr, num, den = frame_info(path)
+            info[clip] = ClipInfo(fr, num, den,
+                                  clip_duration_ns(fr, num, den, path), codec)
     return info
 
 
 # ---------------------------------------------------------------------------
-# simple (non-ordered) chapters XML - used by flat --preserve-chapters
+# chapters XML
 # ---------------------------------------------------------------------------
 def simple_chapters_xml(positions):
+    """Plain (non-ordered) chapters - used by flat --preserve-chapters."""
     x = ['<?xml version="1.0" encoding="UTF-8"?>',
          '<!DOCTYPE Chapters SYSTEM "matroskachapters.dtd">',
          "<Chapters>", "  <EditionEntry>"]
@@ -204,6 +302,76 @@ def simple_chapters_xml(positions):
               "      </ChapterDisplay>", "    </ChapterAtom>"]
     x += ["  </EditionEntry>", "</Chapters>"]
     return "\n".join(x) + "\n"
+
+
+def atom_xml(start, end, hidden, name, seg_uid=None):
+    a = ["    <ChapterAtom>",
+         f"      <ChapterTimeStart>{fmt_ns(start)}</ChapterTimeStart>",
+         f"      <ChapterTimeEnd>{fmt_ns(end)}</ChapterTimeEnd>"]
+    if seg_uid:
+        a.append(f'      <ChapterSegmentUID format="hex">{seg_uid}</ChapterSegmentUID>')
+    a += [f"      <ChapterFlagHidden>{1 if hidden else 0}</ChapterFlagHidden>",
+          "      <ChapterFlagEnabled>1</ChapterFlagEnabled>"]
+    if not hidden:
+        a += ["      <ChapterDisplay>",
+              f"        <ChapterString>{name}</ChapterString>",
+              "        <ChapterLanguage>eng</ChapterLanguage>", "      </ChapterDisplay>"]
+    a.append("    </ChapterAtom>")
+    return a
+
+
+def edition_atom_specs(name, items, clipinfo, positions):
+    """Yield (clip, start, end, hidden, label) atoms for one ordered edition;
+    start/end are within-clip ns. positions=None -> one visible whole-clip atom
+    per item. Else split each clip at the disc-mark positions: pieces starting
+    at a mark are visible chapters; pieces starting at a segment boundary are
+    hidden "joins", except the very first (= movie start, visible Chapter 01)."""
+    if positions is None:
+        for n, (c, _i, _o) in enumerate(items, 1):
+            yield c, 0, clipinfo[c].dur, False, f"{name} {n:02d}"
+        return
+    voff, first, ch = 0, True, 0
+    for c, _i, _o in items:
+        dur = clipinfo[c].dur
+        lm = [p - voff for p in positions if voff < p < voff + dur]
+        bounds = [0] + lm + [dur]
+        for k in range(len(bounds) - 1):
+            hidden = (k == 0 and not first)
+            if not hidden:
+                ch += 1
+            yield c, bounds[k], bounds[k + 1], hidden, f"Chapter {ch:02d}"
+        voff += dur
+        first = False
+
+
+def editions_xml(editions, clipinfo, preserve, atom_fn):
+    """chapters.xml + tags.xml for ordered editions (linked & xin1 modes).
+    atom_fn maps an atom spec to XML lines (adding SegmentUID links or physical
+    file offsets, per mode)."""
+    xml = ['<?xml version="1.0" encoding="UTF-8"?>',
+           '<!DOCTYPE Chapters SYSTEM "matroskachapters.dtd">', "<Chapters>"]
+    tags = ['<?xml version="1.0" encoding="UTF-8"?>',
+            '<!DOCTYPE Tags SYSTEM "matroskatags.dtd">', "<Tags>"]
+    for idx, (name, items, marks) in enumerate(editions):
+        ed = uid()
+        xml += ["  <EditionEntry>",
+                f"    <EditionUID>{ed}</EditionUID>",
+                "    <EditionFlagOrdered>1</EditionFlagOrdered>",
+                f"    <EditionFlagDefault>{1 if idx == 0 else 0}</EditionFlagDefault>",
+                "    <EditionDisplay>",
+                f"      <EditionString>{name}</EditionString>", "    </EditionDisplay>"]
+        positions = (edition_mark_positions(items, marks, clipinfo)
+                     if preserve and marks else None)
+        for spec in edition_atom_specs(name, items, clipinfo, positions):
+            xml += atom_fn(*spec)
+        xml.append("  </EditionEntry>")
+        tags += ["  <Tag>",
+                 f"    <Targets><EditionUID>{ed}</EditionUID></Targets>",
+                 "    <Simple><Name>TITLE</Name>"
+                 f"<String>{name}</String></Simple>", "  </Tag>"]
+    xml.append("</Chapters>")
+    tags.append("</Tags>")
+    return "\n".join(xml) + "\n", "\n".join(tags) + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -233,19 +401,9 @@ def build_flat(stream, out_dir, title, editions, clipinfo, preserve, qpfile):
         lines.append("")
 
         if qpfile:
-            cum, joins = 0, []
-            for c, _i, _o in items:
-                fr = clipinfo[c][0]
-                if fr is None:
-                    joins = None
-                    break
-                cum += fr
-                joins.append(cum)
             qfn = f"{title}.{name}.qpfile.txt"
-            if joins:
-                # drop the final boundary (end of file); force IDR at each seg join.
-                open(os.path.join(out_dir, qfn), "w").write(
-                    "".join(f"{n} I\n" for n in joins[:-1]))
+            if write_qpfile(os.path.join(out_dir, qfn),
+                            [c for c, _i, _o in items], clipinfo):
                 lines.append(f"# re-encode seam list -> {qfn} (x264/x265 --qpfile)")
             else:
                 lines.append(f"# {qfn} skipped: frame counts unavailable")
@@ -257,79 +415,16 @@ def build_flat(stream, out_dir, title, editions, clipinfo, preserve, qpfile):
 # linked mode (ordered chapters + segment linking)
 # ---------------------------------------------------------------------------
 def build_linked(stream, out_dir, title, editions, clipinfo, preserve):
-    order, seen = [], set()
-    for _n, items, _m in editions:
-        for c, _i, _o in items:
-            if c not in seen:
-                seen.add(c); order.append(c)
-
+    order = unique_clips(editions)
     remux = [f"mkvmerge -o seg{c}.mkv --no-chapters --segment-uid 0x{uid_for(c)} "
              f"{shlex.quote(os.path.join(stream, f'{c}.m2ts'))}" for c in order]
 
-    warnings = []
-    for _n, items, _m in editions:
-        for c, in_t, out_t in items:
-            span = int(round((out_t - in_t) * NS / TICKS))
-            if abs(span - clipinfo[c][3]) > 500_000_000:
-                warnings.append(
-                    f"clip {c}: playlist references only {fmt_ns(span)} of a "
-                    f"{fmt_ns(clipinfo[c][3])} clip - atom uses WHOLE clip; fix by hand.")
+    def atom_fn(clip, start, end, hidden, label):
+        return atom_xml(start, end, hidden, label, seg_uid=uid_for(clip))
 
-    def atom(clip, start, end, hidden, name):
-        a = ["    <ChapterAtom>",
-             f"      <ChapterTimeStart>{fmt_ns(start)}</ChapterTimeStart>",
-             f"      <ChapterTimeEnd>{fmt_ns(end)}</ChapterTimeEnd>",
-             f'      <ChapterSegmentUID format="hex">{uid_for(clip)}</ChapterSegmentUID>',
-             f"      <ChapterFlagHidden>{1 if hidden else 0}</ChapterFlagHidden>",
-             "      <ChapterFlagEnabled>1</ChapterFlagEnabled>"]
-        if not hidden:
-            a += ["      <ChapterDisplay>",
-                  f"        <ChapterString>{name}</ChapterString>",
-                  "        <ChapterLanguage>eng</ChapterLanguage>", "      </ChapterDisplay>"]
-        a.append("    </ChapterAtom>")
-        return a
-
-    xml = ['<?xml version="1.0" encoding="UTF-8"?>',
-           '<!DOCTYPE Chapters SYSTEM "matroskachapters.dtd">', "<Chapters>"]
-    tags = ['<?xml version="1.0" encoding="UTF-8"?>',
-            '<!DOCTYPE Tags SYSTEM "matroskatags.dtd">', "<Tags>"]
-    for idx, (name, items, marks) in enumerate(editions):
-        ed = idx + 1
-        xml += ["  <EditionEntry>",
-                f"    <EditionUID>{ed}</EditionUID>",
-                "    <EditionFlagOrdered>1</EditionFlagOrdered>",
-                f"    <EditionFlagDefault>{1 if idx == 0 else 0}</EditionFlagDefault>",
-                "    <EditionDisplay>",
-                f"      <EditionString>{name}</EditionString>", "    </EditionDisplay>"]
-        if preserve and marks:
-            positions = edition_mark_positions(items, marks, clipinfo)
-            voff, first, ch = 0, True, 0
-            for c, _i, _o in items:
-                dur = clipinfo[c][3]
-                lm = [p - voff for p in positions if voff < p < voff + dur]
-                bounds = [0] + lm + [dur]
-                for k in range(len(bounds) - 1):
-                    # a piece starting at a segment boundary is a hidden "join",
-                    # except the very first (= movie start, visible Chapter 01);
-                    # pieces starting at a disc mark are visible chapters.
-                    hidden = (k == 0 and not first)
-                    if not hidden:
-                        ch += 1
-                    xml += atom(c, bounds[k], bounds[k + 1], hidden, f"Chapter {ch:02d}")
-                voff += dur
-                first = False
-        else:
-            for n, (c, _i, _o) in enumerate(items, 1):
-                xml += atom(c, 0, clipinfo[c][3], False, f"{name} {n:02d}")
-        xml.append("  </EditionEntry>")
-        tags += ["  <Tag>",
-                 f"    <Targets><EditionUID>{ed}</EditionUID></Targets>",
-                 "    <Simple><Name>TITLE</Name>"
-                 f"<String>{name}</String></Simple>", "  </Tag>"]
-    xml.append("</Chapters>")
-    tags.append("</Tags>")
-    open(os.path.join(out_dir, "chapters.xml"), "w").write("\n".join(xml) + "\n")
-    open(os.path.join(out_dir, "tags.xml"), "w").write("\n".join(tags) + "\n")
+    xml, tags = editions_xml(editions, clipinfo, preserve, atom_fn)
+    open(os.path.join(out_dir, "chapters.xml"), "w").write(xml)
+    open(os.path.join(out_dir, "tags.xml"), "w").write(tags)
 
     first = editions[0][1][0][0]
     master = (f"mkvmerge -o {shlex.quote(title + '.mkv')} "
@@ -342,8 +437,45 @@ def build_linked(stream, out_dir, title, editions, clipinfo, preserve):
              "# Do NOT let a media server scan this folder (it can't assemble editions).", "",
              "# 1. remux each unique on-disc segment (fixed SegmentUID, no stray chapters)"]
     lines += remux
-    lines += ["", "# 2. mux the husk carrying both editions + edition names", master, ""]
-    return "\n".join(lines) + "\n", warnings
+    lines += ["", "# 2. mux the husk carrying the editions + edition names", master, ""]
+    return "\n".join(lines) + "\n", partial_clip_warnings(editions, clipinfo)
+
+
+# ---------------------------------------------------------------------------
+# xin1 mode (one file, in-file ordered-chapter editions)
+# ---------------------------------------------------------------------------
+def build_xin1(stream, out_dir, title, editions, clipinfo, preserve, qpfile):
+    order = unique_clips(editions)
+    poff, off = {}, 0                 # physical ns offset of each clip in the file
+    for c in order:
+        poff[c] = off
+        off += clipinfo[c].dur
+
+    def atom_fn(clip, start, end, hidden, label):
+        return atom_xml(poff[clip] + start, poff[clip] + end, hidden, label)
+
+    xml, tags = editions_xml(editions, clipinfo, preserve, atom_fn)
+    open(os.path.join(out_dir, "chapters.xml"), "w").write(xml)
+    open(os.path.join(out_dir, "tags.xml"), "w").write(tags)
+
+    outfn = f"{title}.mkv"
+    appended = " + ".join(shlex.quote(os.path.join(stream, f"{c}.m2ts"))
+                          for c in order)
+    lines = ["#!/usr/bin/env bash", "set -euo pipefail", "",
+             "# xin1 mode: every unique clip stored ONCE in one file; each edition is",
+             "# an ordered-chapter timeline seeking inside it. Alternate cuts are",
+             "# mpv-only; other players see the raw concatenation (skewed runtime).", "",
+             f"# {len(order)} unique clips, {len(editions)} editions",
+             f"mkvmerge -o {shlex.quote(outfn)} --chapters chapters.xml "
+             f"--global-tags tags.xml {appended}", ""]
+    if qpfile:
+        qfn = f"{title}.qpfile.txt"
+        if write_qpfile(os.path.join(out_dir, qfn), order, clipinfo):
+            lines.append(f"# re-encode seam list -> {qfn} (x264/x265 --qpfile)")
+        else:
+            lines.append(f"# {qfn} skipped: frame counts unavailable")
+        lines.append("")
+    return "\n".join(lines) + "\n", outfn
 
 
 def main():
@@ -353,12 +485,18 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     clipinfo = gather_clips(stream, editions)
 
-    warnings = []
+    warnings = vc1_warnings(clipinfo, mode)
     if mode == "flat":
-        script, outputs = build_flat(stream, out_dir, title, editions, clipinfo, preserve, qpfile)
+        script, outputs = build_flat(stream, out_dir, title, editions, clipinfo,
+                                     preserve, qpfile)
         summary = "\n".join(f"  {o}" for o in outputs)
+    elif mode == "xin1":
+        script, outfn = build_xin1(stream, out_dir, title, editions, clipinfo,
+                                   preserve, qpfile)
+        summary = f"  {outfn} (one file, ordered-chapter editions) - alternate cuts mpv only"
     else:
-        script, warnings = build_linked(stream, out_dir, title, editions, clipinfo, preserve)
+        script, w = build_linked(stream, out_dir, title, editions, clipinfo, preserve)
+        warnings += w
         summary = f"  {title}.mkv (+ seg*.mkv, chapters.xml, tags.xml) - mpv only"
 
     with open(os.path.join(out_dir, "build.sh"), "w") as f:
@@ -369,7 +507,7 @@ def main():
     print("editions: " + ", ".join(
         f"{n} ({len(i)} segs, {len(m)} marks)" for n, i, m in editions))
     print(f"wrote {out_dir}/build.sh -> produces:\n{summary}")
-    if qpfile and mode == "flat":
+    if qpfile and mode in ("flat", "xin1"):
         print("  qpfile(s) written - consume only if you RE-ENCODE a cut:")
         print("    x264 --qpfile <file>.qpfile.txt ...   |   x265 --qpfile <file>.qpfile.txt ...")
     for w in warnings:

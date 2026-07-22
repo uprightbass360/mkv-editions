@@ -4,13 +4,16 @@ make-sample.py - generate a synthetic, decrypted-BD-style sample tree for
 validating gen-editions.py. No copyrighted material: every segment is a short
 solid-colour clip with its number burned in, plus a distinct sine tone.
 
-It builds two playlists that exercise every case at once:
+It builds three playlists that exercise every case at once:
   Theatrical (00001.mpls): 1 2 3 4 5
   Extended   (00002.mpls): 1 2 11 4 12 5 13
     -> 3 swapped for 11, 12 & 13 are extended-ONLY additions, positions shift.
+  Angled     (00003.mpls): 1 2 [3|21] 4 5
+    -> ONE playlist, TWO angles: slot 3 plays clip 3 (angle 1) or 21 (angle 2);
+       gen-editions.py auto-expands it into one edition per angle.
 
 All segments share identical codecs/resolution/tracks, so both mkvmerge append
-(flat) and mpv segment linking (linked) are valid.
+(flat/xin1) and mpv segment linking (linked) are valid.
 
 Usage:
   make-sample.py [out_dir]            # default ./sample
@@ -40,9 +43,11 @@ SEGMENTS = [
     ("00011", "EXTENDED",    "teal",    5, 349),
     ("00012", "EXTENDED",    "magenta", 5, 392),
     ("00013", "EXTENDED",    "brown",   4, 440),
+    ("00021", "ANGLE2",      "gold",    4, 494),
 ]
 THEATRICAL = ["00001", "00002", "00003", "00004", "00005"]
 EXTENDED   = ["00001", "00002", "00011", "00004", "00012", "00005", "00013"]
+ANGLED     = ["00001", "00002", ("00003", "00021"), "00004", "00005"]
 
 
 def make_segment(path, seg_id, tag, colour, dur, hz):
@@ -61,19 +66,30 @@ def make_segment(path, seg_id, tag, colour, dur, hz):
     ], check=True)
 
 
-def write_mpls(path, clips, durs):
-    """Minimal MPLS with PlayItems (IN=0, OUT=duration) and a chapter mark 2s
-    into each segment (PlayListMark), so --preserve-chapters has data to read."""
+def write_mpls(path, slots, durs):
+    """MPLS with real full-layout PlayItems (IN=0, OUT=duration) and a chapter
+    mark 2s into each segment (PlayListMark), so --preserve-chapters has data
+    to read. A slot given as a tuple is multi-angle: one clip per angle."""
     items = b""
-    for c in clips:
-        out_t = int(durs[c] * 45000)
-        it = (c.encode() + b"M2TS" + b"\x00\x00" + b"\x00"
-              + struct.pack(">I", 0) + struct.pack(">I", out_t) + b"\x00" * 6)
+    for slot in slots:
+        clips = [slot] if isinstance(slot, str) else list(slot)
+        out_t = int(durs[clips[0]] * 45000)
+        multi = len(clips) > 1
+        it = (clips[0].encode() + b"M2TS"
+              + bytes([0x00, 0x10 if multi else 0x00])  # 11 reserved bits, is_multi_angle, connection_condition
+              + b"\x00"                                 # stc_id
+              + struct.pack(">I", 0) + struct.pack(">I", out_t)
+              + b"\x00" * 8                             # uo_mask
+              + b"\x00" * 4)                            # flags, still_mode, still_time
+        if multi:
+            it += bytes([len(clips), 0x00])             # angle count, angle flags
+            for c in clips[1:]:
+                it += c.encode() + b"M2TS" + b"\x00"    # clip, codec, stc_id
         items += struct.pack(">H", len(it)) + it
-    pl_after = struct.pack(">H", 0) + struct.pack(">H", len(clips)) + struct.pack(">H", 0) + items
+    pl_after = struct.pack(">H", 0) + struct.pack(">H", len(slots)) + struct.pack(">H", 0) + items
     playlist_block = struct.pack(">I", len(pl_after)) + pl_after
 
-    marks = [(i, 2 * 45000) for i in range(len(clips))]   # 2s into each PlayItem
+    marks = [(i, 2 * 45000) for i in range(len(slots))]   # 2s into each PlayItem
     entries = b""
     for pi, ts in marks:
         entries += (b"\x00" + b"\x01" + struct.pack(">H", pi)      # reserved, type=chapter, ref
@@ -103,10 +119,15 @@ def main():
 
     write_mpls(os.path.join(playlist, "00001.mpls"), THEATRICAL, durs)
     write_mpls(os.path.join(playlist, "00002.mpls"), EXTENDED, durs)
+    write_mpls(os.path.join(playlist, "00003.mpls"), ANGLED, durs)
+
+    def slot_str(s):
+        return s if isinstance(s, str) else "[" + "|".join(s) + "]"
 
     print(f"\nSample BDMV at: {out_dir}/BDMV")
     print(f"  Theatrical (00001.mpls): {' '.join(THEATRICAL)}")
     print(f"  Extended   (00002.mpls): {' '.join(EXTENDED)}")
+    print(f"  Angled     (00003.mpls): {' '.join(slot_str(s) for s in ANGLED)}  (2 angles)")
     print("\nNext:")
     print(f'  ./mkv-editions.sh {out_dir}/BDMV ./out --title Sample \\')
     print('      "Theatrical=00001.mpls" "Extended=00002.mpls"')

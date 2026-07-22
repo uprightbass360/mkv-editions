@@ -181,7 +181,7 @@ ships its own Matroska demuxer) can assemble a branched cut. That forces a choic
 
 | Approach | What a media server actually plays | Space | Verdict |
 |---|---|---|---|
-| **Xin1** - scenes appended to one track, chapters seek back/forth | theatrical, then extended scenes dumped out-of-context at the end | 1× + scenes | runtime **skewed**, garbage tail; extended cut mpv-only |
+| **Xin1** (`--mode xin1`) - unique clips appended once into ONE file, ordered chapters seek back/forth | theatrical, then extended scenes dumped out-of-context at the end | 1× + scenes | runtime **skewed**, garbage tail; extended cut mpv-only; but a single tidy file |
 | **Two video tracks** - theatrical=trk1, extended=trk2 | default track only (theatrical) | ~2× | no auto-branching anywhere; server can't reach trk2 |
 | **Ordered chapters** (`--mode linked`) | theatrical husk, *correct* | 1× + scenes | extended cut **mpv-only**; scene files clutter the scanner |
 | **Flat files** (`--mode flat`, default) | every cut, *correctly* | N× (dup) | **plays everywhere**; shared video duplicated on disk |
@@ -193,6 +193,8 @@ timeline existing somewhere. So:
 
 - **Both cuts must play on Plex/Jellyfin/Emby** → `--mode flat` (duplicates shared video).
 - **Space-efficient archive, full experience in mpv** → `--mode linked`.
+- **Same, but as ONE file with no `seg*.mkv` siblings** → `--mode xin1` (other
+  players see the raw concatenation, so keep it away from media servers too).
 
 ## Step 4 - auto-generate it from the disc (`gen-editions.py`)
 
@@ -212,7 +214,11 @@ dependencies (`mkvmerge`, `ffprobe`, `python3`):
     ./mkv-editions.sh /mnt/backup/BDMV ./out --mode linked --title "Fellowship" \
         "Theatrical Cut=00001.mpls" "Extended Cut=00002.mpls"
 
-    # 3c. add real disc chapters + a re-encode seam list:
+    # 3c. XIN1 - mpv-only alternates, space-efficient, single file:
+    ./mkv-editions.sh /mnt/backup/BDMV ./out --mode xin1 --title "Fellowship" \
+        "Theatrical Cut=00001.mpls" "Extended Cut=00002.mpls"
+
+    # 3d. add real disc chapters + a re-encode seam list:
     ./mkv-editions.sh /mnt/backup/BDMV ./out --title "Fellowship" \
         --preserve-chapters --qpfile \
         "Theatrical Cut=00001.mpls" "Extended Cut=00002.mpls"
@@ -228,14 +234,21 @@ same way). Scene chapters are added at each append point. Plays in anything.
 SegmentUID = `%032x` of the clip number) + `chapters.xml` (ordered `<EditionEntry>` per
 playlist) + `tags.xml` (edition names). Play with `mpv Fellowship.mkv --edition=0|1`.
 
-### Options (sniped from [Xin1Generator](https://code.google.com/archive/p/xin1generator))
+**xin1** produces a single `Fellowship.mkv`: every unique clip appended once, one
+ordered `<EditionEntry>` per playlist whose atoms seek within the file itself (no
+`ChapterSegmentUID`, no external segments, no duplicated video). Play with
+`mpv Fellowship.mkv --edition=0|1` - mpv even shows the edition names here, since
+no segment linking is involved. Any other player sees the raw concatenation.
+
+### Options (after [Xin1Generator](https://code.google.com/archive/p/xin1generator))
 
 - **`--preserve-chapters`** - reads the disc's chapter marks from the `.mpls`
   **PlayListMark** table and emits them as real chapters. In `flat` mode they become
   ordinary chapter stops on the concatenated timeline; in `linked` mode the disc
   chapters are *visible* while the segment-join atoms are *hidden* (`ChapterFlagHidden`),
   so you get proper chapter navigation without the joins cluttering the menu.
-- **`--qpfile`** (flat) - writes `<title>.<Edition>.qpfile.txt`, forcing an IDR frame
+- **`--qpfile`** (flat/xin1) - writes `<title>.<Edition>.qpfile.txt` per flat
+  edition (or one `<title>.qpfile.txt` for the xin1 file), forcing an IDR frame
   at each segment seam (`<frame> I`, valid for **both** x264 and x265 `--qpfile`). Use
   it if you re-encode a flat edition, so cuts stay seamless: `x265 --qpfile … in.y4m`.
 - **Edition names** - `linked` mode writes `EditionDisplay/EditionString` *and* a
@@ -244,6 +257,28 @@ playlist) + `tags.xml` (edition names). Play with `mpv Fellowship.mkv --edition=
 - **Frame-exact boundaries** - chapter end times are computed from exact frame count ÷
   frame rate (via ffprobe), not container duration, so splice points land on real frame
   boundaries. Falls back to container duration if a stream lacks a frame count.
+
+### Options (after [aobikari](https://codeberg.org/arch1t3cht/aobikari))
+
+- **Multi-angle playlists** - some discs branch via camera *angles* instead of
+  separate playlists: one `.mpls` where each PlayItem carries one clip per angle.
+  These auto-expand: `"Name=pl.mpls"` with N angles yields N editions - `Name`,
+  `Name (Angle 2)`, ... (angle k plays each item's k-th clip, base clip where an
+  item has fewer angles). Previously the extra angles were silently dropped.
+- **`--mode xin1`** - aobikari's single-file architecture (see the mode table),
+  built with mkvmerge appends instead of its raw PES-timestamp rewriting.
+- **VC-1 append warning** - mkvmerge appends skip one frame per splice on VC-1
+  (V_MS/VFW stores DTS; the decoder-delay offset compensates once per file, not
+  per splice - [mkvtoolnix#6194](https://codeberg.org/mbunkus/mkvtoolnix/issues/6194),
+  the bug aobikari exists to avoid). flat/xin1 runs warn when any source clip is
+  VC-1 and point at `--mode linked`, which never appends.
+- **out_time distrust** - aobikari: "we seemingly cannot rely on pi->out_time".
+  The linked-mode partial-clip warning now also accepts the span implied by the
+  NEXT PlayItem's in_time before flagging a clip, avoiding false alarms on discs
+  with junk out_time values.
+- **Random EditionUIDs** - editions get random nonzero 64-bit UIDs (spec-friendly
+  uniqueness across files) instead of 1, 2, ... SegmentUIDs stay deterministic -
+  they are the linking addresses.
 
 Assumptions / when to intervene (linked mode):
 - Assumes each PlayItem uses the WHOLE clip (start 0 -> duration). True for real
@@ -277,10 +312,12 @@ clips is always safe.)
 
 Commercial seamless-branching discs are copyrighted, so `samples/make-sample.py`
 builds a **synthetic** decrypted BDMV instead - short numbered/coloured clips, each
-with a distinct tone, and two playlists that exercise swap + addition + reorder at once:
+with a distinct tone, and three playlists that exercise swap + addition + reorder +
+angles at once:
 
     Theatrical (00001.mpls): 1 2 3 4 5
     Extended   (00002.mpls): 1 2 11 4 12 5 13     # 3->11 swapped, 12 & 13 added
+    Angled     (00003.mpls): 1 2 [3|21] 4 5       # ONE playlist, TWO angles at slot 3
 
 The sample also embeds a `PlayListMark` chapter 2 s into every segment, so
 `--preserve-chapters` has real marks to read.
@@ -295,11 +332,17 @@ Verified end-to-end with **ffmpeg 6.1 + mkvmerge v82 + mpv 0.37**:
 - **linked** → husk + 8 segment files, 2 ordered editions, 12 `ChapterSegmentUID` links,
   each resolving to the matching segment's real `SegmentUID`; mpv assembles both cuts and a
   screenshot at t=10 s shows `SEG 00003` (theatrical) vs `SEG 00011` (extended).
-- **`--preserve-chapters`** → flat cuts get 8/10 chapters at the mark positions; linked cuts
-  interleave visible disc chapters with hidden segment joins (first chapter visible at 0).
-- **`--qpfile`** → Extended seam list `96 192 312 408 528 624` = exact frame joins at 24 fps.
-  Fed through **x264 0.164 and x265 3.5** (`--qpfile`), both accept the format and place IDR
-  frames at exactly `0 96 192 312 408 528 624` - seams land on keyframes, so re-encoded cuts stay seamless.
+- **xin1** → ONE 34.1 s file (8 unique clips stored once), 2 ordered editions; mpv reports
+  20 s / 30 s per edition, shows their names, and the same t=10 s screenshots as linked.
+- **angles** → `"Cut=00003.mpls"` auto-expands to 2 editions; at t=10 s angle 1 shows
+  `SEG 00003`, angle 2 shows `SEG 00021` - in flat (two files) and xin1 (one 24.1 s file).
+- **`--preserve-chapters`** → flat cuts get 6/8 chapters at the mark positions; linked and
+  xin1 cuts interleave 14 visible disc chapters with 10 hidden segment joins (first chapter
+  visible at 0).
+- **`--qpfile`** → flat Extended seam list `96 192 312 408 528 624`, xin1 union seam list
+  `96 192 288 384 480 600 720` = exact frame joins at 24 fps. Fed through **x264 0.164 and
+  x265 3.5** (`--qpfile`), both accept the format and place IDR frames exactly at the seams,
+  so re-encoded cuts stay seamless.
 
 Note on the element name: the current Matroska spec renamed the *binary* element to
 `ChapterSegmentUUID`, but MKVToolNix's chapter **XML** still uses `ChapterSegmentUID`
@@ -358,7 +401,12 @@ both cheap to produce - it can't vote ffmpeg a new feature.
   the original seamless-branching-to-Matroska tool. This project reads `.mpls` directly
   (it wrapped eac3to/xport) and targets flat + linked output rather than its append
   approach, but the chapter-preservation, qpfile, edition-naming and frame-exact-boundary
-  ideas are sniped from it.
+  ideas come from it.
+- **[aobikari](https://codeberg.org/arch1t3cht/aobikari)** (arch1t3cht, 2026) - open-source
+  seamless-branching remuxer built on libbluray, aimed at *angle*-branched discs; it produces
+  a single combined m2ts (PES timestamps rewritten packet-by-packet) plus in-file ordered
+  editions. The multi-angle support, xin1 mode, VC-1 append warning and out_time distrust
+  follow its lead.
 - **["101 things you never knew you could do with Matroska"](https://mod16.org/hurfdurf/?p=8)**
   (TheFluff, 2007) - the definitive explainer of editions, ordered chapters and segment
   linking. Concepts still current; its 2007 tooling/player advice is not.

@@ -4,7 +4,7 @@
 #
 # Usage:
 #   ./mkv-editions.sh [--install-deps] <BDMV_dir> <out_dir> \
-#       [--mode flat|linked] [--title NAME] [--preserve-chapters] [--qpfile] \
+#       [--mode flat|linked|xin1] [--title NAME] [--preserve-chapters] [--qpfile] \
 #       "<Edition>=<playlist.mpls>" ...
 #   (all options are forwarded verbatim to src/gen-editions.py)
 #
