@@ -172,37 +172,62 @@ Keep `seg01.mkv … seg13.mkv` in the SAME folder as `LOTR.mkv`. mpv resolves th
   to hard-concatenate each edition — simple, plays everywhere, but duplicates the shared segments.
 - The whole point of linking: shared segments stored once. Two editions ≈ one movie's worth of bytes.
 
-## Step 4 — auto-generate this XML from the disc (`gen-editions.py`)
+## Which mode do you want? (read this first)
 
-Instead of hand-writing atoms, `src/gen-editions.py` reads the on-disc `.mpls` play
-order and emits `chapters.xml` + `build.sh` for you. It parses the MPLS PlayItem
-list directly (no libbluray/mpls_dump needed) and dedupes clips so each shared
-segment is remuxed once. Requires `mkvmerge` + `ffprobe` on PATH.
+The whole design hinges on one fact: **ffmpeg honors neither ordered chapters nor
+segment linking.** It plays the linear default track and nothing else. Plex,
+Jellyfin, and Emby all analyze/transcode through ffmpeg — so *only mpv* (which
+ships its own Matroska demuxer) can assemble a branched cut. That forces a choice:
+
+| Approach | What a media server actually plays | Space | Verdict |
+|---|---|---|---|
+| **Xin1** — scenes appended to one track, chapters seek back/forth | theatrical, then extended scenes dumped out-of-context at the end | 1× + scenes | runtime **skewed**, garbage tail; extended cut mpv-only |
+| **Two video tracks** — theatrical=trk1, extended=trk2 | default track only (theatrical) | ~2× | no auto-branching anywhere; server can't reach trk2 |
+| **Ordered chapters** (`--mode linked`) | theatrical husk, *correct* | 1× + scenes | extended cut **mpv-only**; scene files clutter the scanner |
+| **Flat files** (`--mode flat`, default) | every cut, *correctly* | N× (dup) | **plays everywhere**; shared video duplicated on disk |
+
+"Flatten" and "dedup" are the same coin, opposite sides: `mkvmerge` gives you a
+universally-playable file *because* it writes the shared video out as real bytes.
+There is no ffmpeg-visible way to have a playable extended cut without its full
+timeline existing somewhere. So:
+
+- **Both cuts must play on Plex/Jellyfin/Emby** → `--mode flat` (duplicates shared video).
+- **Space-efficient archive, full experience in mpv** → `--mode linked`.
+
+## Step 4 — auto-generate it from the disc (`gen-editions.py`)
+
+`src/gen-editions.py` reads the on-disc `.mpls` play order and writes a `build.sh`.
+It parses the MPLS PlayItem list directly (no libbluray/mpls_dump needed); MPLS
+timestamps are 45 kHz. Use the wrapper `./mkv-editions.sh`, which also checks/installs
+dependencies (`mkvmerge`, `ffprobe`, `python3`):
 
     # 1. MakeMKV -> Backup mode -> decrypted BDMV/ (contains PLAYLIST/ + STREAM/)
-    # 2. Identify the two playlists (MakeMKV title info, or bdinfo, shows the .mpls names)
-    # 3. Generate:
-    python3 src/gen-editions.py /mnt/backup/BDMV ./out \
-        theatrical=00001.mpls extended=00002.mpls
+    # 2. Identify the playlists (MakeMKV title info / bdinfo shows the .mpls names)
+
+    # 3a. FLAT (default) — server-ready, one self-contained file per edition:
+    ./mkv-editions.sh --install-deps /mnt/backup/BDMV ./out --title "Fellowship" \
+        "Theatrical Cut=00001.mpls" "Extended Cut=00002.mpls"
+
+    # 3b. LINKED — mpv-only, space-efficient:
+    ./mkv-editions.sh /mnt/backup/BDMV ./out --mode linked --title "Fellowship" \
+        "Theatrical Cut=00001.mpls" "Extended Cut=00002.mpls"
 
     # 4. Build:
-    cd out && bash build.sh          # remuxes each segment + muxes movie.mkv
+    cd out && bash build.sh
 
-    # 5. Play:
-    mpv movie.mkv --edition=0        # theatrical
-    mpv movie.mkv --edition=1        # extended
+**flat** produces `Fellowship {edition-Theatrical Cut}.mkv` etc. — the `{edition-…}`
+tag is Plex's native Editions convention (Jellyfin/Emby group alternate versions the
+same way). Scene chapters are added at each append point. Plays in anything.
 
-What it produces in `./out/`:
-- `segNNNNN.mkv` — one per unique on-disc clip, fixed SegmentUID = `%032x` of the clip number
-- `chapters.xml` — one ordered `<EditionEntry>` per playlist, atoms in play order
-- `build.sh`     — the remux commands + the master `mkvmerge` mux
-- `movie.mkv`    — master "playlist" carrying both editions, links to the seg files
+**linked** produces `Fellowship.mkv` (husk) + `segNNNNN.mkv` (one per unique clip,
+SegmentUID = `%032x` of the clip number) + `chapters.xml` (one ordered `<EditionEntry>`
+per playlist). Play with `mpv Fellowship.mkv --edition=0|1`.
 
-Assumptions / when to intervene:
-- Assumes each PlayItem uses the WHOLE clip (start 0 -> clip duration). True for real
-  seamless-branching discs. If a playlist references only a sub-range of a clip, the
-  script still writes a whole-clip atom but prints a `WARNING` naming that clip — fix
-  its `ChapterTimeStart/End` by hand (the .mpls alone lacks the clip's first-PTS offset).
-- Keep all `segNNNNN.mkv` in the same folder as `movie.mkv`; mpv resolves the
-  `ChapterSegmentUID` links by scanning sibling files.
-- More than two editions? Just pass more `name=playlist.mpls` args — one edition each.
+Assumptions / when to intervene (linked mode):
+- Assumes each PlayItem uses the WHOLE clip (start 0 -> duration). True for real
+  seamless-branching discs. If a playlist references only a sub-range, the script
+  still writes a whole-clip atom but prints a `WARNING` naming that clip — fix its
+  `ChapterTimeStart/End` by hand (the .mpls alone lacks the clip's first-PTS offset).
+- Keep all `segNNNNN.mkv` beside `Fellowship.mkv`; mpv resolves the links by scanning
+  siblings. Don't point a media server at this folder — it can't assemble editions.
+- More editions? Pass more `"Name=playlist.mpls"` args — one ordered edition each.

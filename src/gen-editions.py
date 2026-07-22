@@ -1,23 +1,33 @@
 #!/usr/bin/env python3
 """
-gen-editions.py — build editioned MKVs (seamless-branching style) from a
-decrypted BD backup, by reading the on-disc .mpls play order.
+gen-editions.py — build editioned MKVs from a decrypted BD backup by reading
+the on-disc .mpls play order.
 
-For each named playlist it emits one ordered <EditionEntry>; shared segments
-are stored once and referenced by every edition that uses them.
+MODES
+  flat    (default) One self-contained file per edition, produced by appending
+          the on-disc segments with mkvmerge. Plays on ANY player, including
+          Plex / Jellyfin / Emby, because each cut is a real linear track.
+          Cost: shared video is duplicated on disk — the unavoidable price of
+          ffmpeg not honoring ordered chapters. Files are named for the media
+          server "Editions" feature:  "<title> {edition-Name}.mkv".
 
-Usage:
-    gen-editions.py <BDMV_dir> <out_dir> <name=playlist.mpls> [<name=playlist.mpls> ...]
+  linked  Space-efficient, but mpv-ONLY. Theatrical husk + external per-segment
+          files joined by ordered chapters / segment linking. Shared segments
+          are stored once. ffmpeg-based media servers CANNOT assemble the
+          extended cut from this — they'll only ever see the theatrical husk.
 
-Example (LOTR: theatrical = 00001.mpls, extended = 00002.mpls):
-    gen-editions.py /mnt/backup/BDMV ./out theatrical=00001.mpls extended=00002.mpls
+USAGE
+  gen-editions.py <BDMV_dir> <out_dir> [--mode flat|linked] [--title NAME]
+                  "<Edition Name>=<playlist.mpls>" [ "<Edition Name>=..." ] ...
 
-Then:
-    cd out && bash build.sh        # remuxes segments + muxes the master
-    mpv movie.mkv                  # --edition=0 theatrical, --edition=1 extended
+EXAMPLE
+  gen-editions.py /mnt/backup/BDMV ./out --title "The Fellowship of the Ring" \\
+      "Theatrical Cut=00001.mpls" "Extended Cut=00002.mpls"
 
-Requires: mkvmerge + ffprobe on PATH. No libbluray/mpls_dump needed — the .mpls
-PlayItem list is parsed directly (MPLS timestamps are 45 kHz).
+Then:  cd out && bash build.sh
+
+Requires mkvmerge on PATH (+ ffprobe for --mode linked). The .mpls PlayItem list
+is parsed directly (no libbluray/mpls_dump needed); MPLS timestamps are 45 kHz.
 """
 
 import os
@@ -40,7 +50,7 @@ def parse_mpls(path):
     for _ in range(n_items):
         length = int.from_bytes(data[pos:pos + 2], "big")
         it = data[pos + 2:pos + 2 + length]
-        clip = it[0:5].decode("ascii")            # e.g. "00001" -> STREAM/00001.m2ts
+        clip = it[0:5].decode("ascii")            # "00001" -> STREAM/00001.m2ts
         in_t = int.from_bytes(it[12:16], "big")
         out_t = int.from_bytes(it[16:20], "big")
         items.append((clip, in_t, out_t))
@@ -67,41 +77,77 @@ def ffprobe_ns(path):
     return int(round(float(out) * 1_000_000_000))
 
 
-def main():
-    if len(sys.argv) < 4 or "=" not in sys.argv[3]:
+def parse_args(argv):
+    mode, title, pos, eds = "flat", "movie", [], []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--mode":
+            mode = argv[i + 1]; i += 2; continue
+        if a == "--title":
+            title = argv[i + 1]; i += 2; continue
+        if a.startswith("--mode="):
+            mode = a.split("=", 1)[1]; i += 1; continue
+        if a.startswith("--title="):
+            title = a.split("=", 1)[1]; i += 1; continue
+        if "=" in a and len(pos) >= 2:               # "<Name>=<playlist.mpls>"
+            name, mpls = a.split("=", 1)
+            eds.append((name, mpls)); i += 1; continue
+        pos.append(a); i += 1
+    if len(pos) < 2 or not eds or mode not in ("flat", "linked"):
         sys.exit(__doc__)
-    bdmv, out_dir = sys.argv[1], sys.argv[2]
-    stream = os.path.join(bdmv, "STREAM")
-    editions = []
-    for arg in sys.argv[3:]:
-        name, mpls = arg.split("=", 1)
-        if not os.path.isabs(mpls):
+    return pos[0], pos[1], mode, title, eds
+
+
+def load_editions(bdmv, eds):
+    out = []
+    for name, mpls in eds:
+        if not os.path.isabs(mpls) and not os.path.exists(mpls):
             mpls = os.path.join(bdmv, "PLAYLIST", mpls)
-        editions.append((name, parse_mpls(mpls)))
+        out.append((name, parse_mpls(mpls)))
+    return out
 
-    os.makedirs(out_dir, exist_ok=True)
 
-    # Unique clips across all editions -> one remux each.
-    clips = {}
-    order = []
-    for _, items in editions:
+# ----------------------------------------------------------------------------
+# flat mode: one self-contained, server-playable file per edition
+# ----------------------------------------------------------------------------
+def build_flat(bdmv, out_dir, title, editions):
+    stream = os.path.join(bdmv, "STREAM")
+    lines = ["#!/usr/bin/env bash", "set -euo pipefail", "",
+             "# flat mode: each cut is a real linear track -> plays on Plex/Jellyfin/Emby.",
+             "# Shared video is duplicated across files (unavoidable for ffmpeg players).", ""]
+    outputs = []
+    for name, items in editions:
+        srcs = [os.path.join(stream, f"{c}.m2ts") for c, _i, _o in items]
+        appended = " + ".join(shlex.quote(s) for s in srcs)
+        outfn = f"{title} {{edition-{name}}}.mkv"
+        outputs.append(outfn)
+        lines.append(f"# {name}: {len(items)} segments")
+        lines.append(
+            f"mkvmerge -o {shlex.quote(outfn)} "
+            f"--generate-chapters when-appending {appended}")
+        lines.append("")
+    return "\n".join(lines) + "\n", outputs
+
+
+# ----------------------------------------------------------------------------
+# linked mode: mpv-only, space-efficient ordered-chapters / segment linking
+# ----------------------------------------------------------------------------
+def build_linked(bdmv, out_dir, title, editions):
+    stream = os.path.join(bdmv, "STREAM")
+    clips, order = {}, []
+    for _n, items in editions:
         for clip, in_t, out_t in items:
             if clip not in clips:
-                clips[clip] = (in_t, out_t)
-                order.append(clip)
+                clips[clip] = (in_t, out_t); order.append(clip)
 
-    # 1. build.sh: remux each clip to its own MKV with a fixed SegmentUID.
     remux, seg_files = [], {}
     for clip in order:
-        src = os.path.join(stream, f"{clip}.m2ts")
-        dst = f"seg{clip}.mkv"
-        seg_files[clip] = dst
+        dst = f"seg{clip}.mkv"; seg_files[clip] = dst
         remux.append(
-            f"mkvmerge -o {shlex.quote(dst)} "
-            f"--segment-uid 0x{uid_for(clip)} {shlex.quote(src)}")
+            f"mkvmerge -o {shlex.quote(dst)} --segment-uid 0x{uid_for(clip)} "
+            f"{shlex.quote(os.path.join(stream, f'{clip}.m2ts'))}")
 
-    # 2. Durations: probe the SOURCE clip now so we can write the XML in one pass.
-    #    (build.sh reproduces the remux; probing the .m2ts gives the same length.)
     durations, warnings = {}, []
     for clip, (in_t, out_t) in clips.items():
         src = os.path.join(stream, f"{clip}.m2ts")
@@ -112,12 +158,11 @@ def main():
             warnings.append(f"clip {clip}: ffprobe failed ({e}); used mpls span")
         durations[clip] = dur_ns
         span_ns = (out_t - in_t) * 1_000_000_000 // TICKS_PER_SEC
-        if abs(span_ns - dur_ns) > 500_000_000:  # >0.5s => partial reference
+        if abs(span_ns - dur_ns) > 500_000_000:
             warnings.append(
                 f"clip {clip}: playlist references only {fmt_ns(span_ns)} of a "
                 f"{fmt_ns(dur_ns)} clip — atom uses WHOLE clip; fix in/out by hand.")
 
-    # 3. chapters.xml
     xml = ['<?xml version="1.0" encoding="UTF-8"?>',
            '<!DOCTYPE Chapters SYSTEM "matroskachapters.dtd">', "<Chapters>"]
     for idx, (name, items) in enumerate(editions):
@@ -139,25 +184,41 @@ def main():
     xml.append("</Chapters>")
     open(os.path.join(out_dir, "chapters.xml"), "w").write("\n".join(xml) + "\n")
 
-    # 4. Master mux: body = first clip of first edition, plus the editions.
-    first_clip = editions[0][1][0][0]
+    first = editions[0][1][0][0]
     master = (
-        "mkvmerge -o movie.mkv "
+        f"mkvmerge -o {shlex.quote(title + '.mkv')} "
         "--segment-uid 0x000000000000000000000000000000ff "
-        "--chapters chapters.xml "
-        f"{shlex.quote(seg_files[first_clip])}")
+        f"--chapters chapters.xml {shlex.quote(seg_files[first])}")
+
+    lines = ["#!/usr/bin/env bash", "set -euo pipefail", "",
+             f"# linked mode: mpv-ONLY. Keep every seg*.mkv beside {title}.mkv.",
+             "# Do NOT let a media server scan this folder (it can't assemble editions).", "",
+             "# 1. remux each unique on-disc segment (fixed SegmentUID)"]
+    lines += remux
+    lines += ["", "# 2. mux the husk carrying both editions", master, ""]
+    return "\n".join(lines) + "\n", warnings
+
+
+def main():
+    bdmv, out_dir, mode, title, eds = parse_args(sys.argv[1:])
+    editions = load_editions(bdmv, eds)
+    os.makedirs(out_dir, exist_ok=True)
+
+    warnings = []
+    if mode == "flat":
+        script, outputs = build_flat(bdmv, out_dir, title, editions)
+        summary = "\n".join(f"  {o}" for o in outputs)
+    else:
+        script, warnings = build_linked(bdmv, out_dir, title, editions)
+        summary = f"  {title}.mkv (+ seg*.mkv, chapters.xml) — mpv only"
 
     with open(os.path.join(out_dir, "build.sh"), "w") as f:
-        f.write("#!/usr/bin/env bash\nset -euo pipefail\n\n")
-        f.write("# 1. remux each on-disc segment to its own MKV (fixed SegmentUID)\n")
-        f.write("\n".join(remux) + "\n\n")
-        f.write("# 2. mux the master 'playlist' carrying both editions\n")
-        f.write(master + "\n")
+        f.write(script)
     os.chmod(os.path.join(out_dir, "build.sh"), 0o755)
 
-    print(f"Wrote {out_dir}/chapters.xml and {out_dir}/build.sh")
-    print(f"Editions: " + ", ".join(f"{n}={len(i)} segs" for n, i in editions))
-    print(f"Unique segments: {len(order)} (shared clips stored once)")
+    print(f"mode: {mode}")
+    print("editions: " + ", ".join(f"{n} ({len(i)} segs)" for n, i in editions))
+    print(f"wrote {out_dir}/build.sh -> produces:\n{summary}")
     if warnings:
         print("\nWARNINGS:")
         for w in warnings:
