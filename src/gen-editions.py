@@ -40,9 +40,11 @@ import sys
 import shlex
 import subprocess
 from collections import namedtuple
+from xml.sax.saxutils import escape as xml_escape
 
 TICKS = 45000  # MPLS timestamps are 45 kHz
 NS = 1_000_000_000
+JOIN_TOL_NS = 1_000_000  # marks within 1 ms of a splice count as AT the splice
 
 ClipInfo = namedtuple("ClipInfo", "frames num den dur codec")
 
@@ -61,14 +63,24 @@ def parse_mpls(path):
 
     n_items = int.from_bytes(data[pl_start + 6:pl_start + 8], "big")
     pos, items = pl_start + 10, []
+    def clip_id(raw):
+        if len(raw) != 5 or not raw.isdigit():
+            sys.exit(f"{path}: malformed PlayItem (bad clip id {raw!r})")
+        return raw.decode("ascii")
+
     for _ in range(n_items):
         length = int.from_bytes(data[pos:pos + 2], "big")
         it = data[pos + 2:pos + 2 + length]
-        clips = [it[0:5].decode("ascii")]
+        if len(it) < 20:
+            sys.exit(f"{path}: malformed PlayItem ({len(it)} bytes)")
+        clips = [clip_id(it[0:5])]
         if (it[10] >> 4) & 1:                    # is_multi_angle
-            for a in range(it[32] - 1):          # entries: clip(5)+codec(4)+stc(1)
+            n_extra = it[32] - 1 if len(it) > 32 else -1
+            if n_extra < 0 or len(it) < 34 + 10 * n_extra:
+                sys.exit(f"{path}: truncated multi-angle table in PlayItem")
+            for a in range(n_extra):             # entries: clip(5)+codec(4)+stc(1)
                 off = 34 + 10 * a
-                clips.append(it[off:off + 5].decode("ascii"))
+                clips.append(clip_id(it[off:off + 5]))
         items.append((clips,
                       int.from_bytes(it[12:16], "big"),
                       int.from_bytes(it[16:20], "big")))
@@ -200,17 +212,19 @@ def partial_clip_warnings(editions, clipinfo):
     """(linked mode) A PlayItem spanning less than its whole clip needs its atom
     fixed by hand. MPLS out_time is unreliable (aobikari's finding), so also
     accept the span implied by the NEXT item's in_time before warning."""
-    warns = []
+    warns, seen = [], set()
     for _n, items, _m in editions:
         for i, (c, in_t, out_t) in enumerate(items):
             spans = {out_t - in_t}
             if i + 1 < len(items):
                 spans.add(items[i + 1][1] - in_t)
             if all(abs(s * NS / TICKS - clipinfo[c].dur) > 500_000_000 for s in spans):
-                warns.append(
-                    f"clip {c}: playlist references only "
-                    f"{fmt_ns(int((out_t - in_t) * NS / TICKS))} of a "
-                    f"{fmt_ns(clipinfo[c].dur)} clip - atom uses WHOLE clip; fix by hand.")
+                msg = (f"clip {c}: playlist references only "
+                       f"{fmt_ns(int((out_t - in_t) * NS / TICKS))} of a "
+                       f"{fmt_ns(clipinfo[c].dur)} clip - atom uses WHOLE clip; fix by hand.")
+                if msg not in seen:
+                    seen.add(msg)
+                    warns.append(msg)
     return warns
 
 
@@ -274,11 +288,13 @@ def load_editions(bdmv, eds):
 
 def gather_clips(stream, editions):
     info = {}
-    for _n, items, _m in editions:
+    for name, items, _m in editions:
         for clip, _i, _o in items:
             if clip in info:
                 continue
             path = os.path.join(stream, f"{clip}.m2ts")
+            if not os.path.exists(path):
+                sys.exit(f"missing clip: {path} (referenced by edition \"{name}\")")
             codec, fr, num, den = frame_info(path)
             info[clip] = ClipInfo(fr, num, den,
                                   clip_duration_ns(fr, num, den, path), codec)
@@ -314,7 +330,7 @@ def atom_xml(start, end, hidden, name, seg_uid=None):
           "      <ChapterFlagEnabled>1</ChapterFlagEnabled>"]
     if not hidden:
         a += ["      <ChapterDisplay>",
-              f"        <ChapterString>{name}</ChapterString>",
+              f"        <ChapterString>{xml_escape(name)}</ChapterString>",
               "        <ChapterLanguage>eng</ChapterLanguage>", "      </ChapterDisplay>"]
     a.append("    </ChapterAtom>")
     return a
@@ -325,7 +341,9 @@ def edition_atom_specs(name, items, clipinfo, positions):
     start/end are within-clip ns. positions=None -> one visible whole-clip atom
     per item. Else split each clip at the disc-mark positions: pieces starting
     at a mark are visible chapters; pieces starting at a segment boundary are
-    hidden "joins", except the very first (= movie start, visible Chapter 01)."""
+    hidden "joins", except the very first (= movie start, visible Chapter 01)
+    and joins that coincide with a disc mark (real discs put most chapters
+    exactly at splice points - those joins ARE the chapters)."""
     if positions is None:
         for n, (c, _i, _o) in enumerate(items, 1):
             yield c, 0, clipinfo[c].dur, False, f"{name} {n:02d}"
@@ -333,10 +351,11 @@ def edition_atom_specs(name, items, clipinfo, positions):
     voff, first, ch = 0, True, 0
     for c, _i, _o in items:
         dur = clipinfo[c].dur
-        lm = [p - voff for p in positions if voff < p < voff + dur]
+        lm = [p - voff for p in positions if voff + JOIN_TOL_NS < p < voff + dur]
+        mark_at_join = any(abs(p - voff) <= JOIN_TOL_NS for p in positions)
         bounds = [0] + lm + [dur]
         for k in range(len(bounds) - 1):
-            hidden = (k == 0 and not first)
+            hidden = (k == 0 and not first and not mark_at_join)
             if not hidden:
                 ch += 1
             yield c, bounds[k], bounds[k + 1], hidden, f"Chapter {ch:02d}"
@@ -359,7 +378,8 @@ def editions_xml(editions, clipinfo, preserve, atom_fn):
                 "    <EditionFlagOrdered>1</EditionFlagOrdered>",
                 f"    <EditionFlagDefault>{1 if idx == 0 else 0}</EditionFlagDefault>",
                 "    <EditionDisplay>",
-                f"      <EditionString>{name}</EditionString>", "    </EditionDisplay>"]
+                f"      <EditionString>{xml_escape(name)}</EditionString>",
+                "    </EditionDisplay>"]
         positions = (edition_mark_positions(items, marks, clipinfo)
                      if preserve and marks else None)
         for spec in edition_atom_specs(name, items, clipinfo, positions):
@@ -368,7 +388,7 @@ def editions_xml(editions, clipinfo, preserve, atom_fn):
         tags += ["  <Tag>",
                  f"    <Targets><EditionUID>{ed}</EditionUID></Targets>",
                  "    <Simple><Name>TITLE</Name>"
-                 f"<String>{name}</String></Simple>", "  </Tag>"]
+                 f"<String>{xml_escape(name)}</String></Simple>", "  </Tag>"]
     xml.append("</Chapters>")
     tags.append("</Tags>")
     return "\n".join(xml) + "\n", "\n".join(tags) + "\n"
