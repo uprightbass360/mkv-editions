@@ -369,6 +369,9 @@ def main():
     print("editions: " + ", ".join(
         f"{n} ({len(i)} segs, {len(m)} marks)" for n, i, m in editions))
     print(f"wrote {out_dir}/build.sh -> produces:\n{summary}")
+    if qpfile and mode == "flat":
+        print("  qpfile(s) written — consume only if you RE-ENCODE a cut:")
+        print("    x264 --qpfile <file>.qpfile.txt ...   |   x265 --qpfile <file>.qpfile.txt ...")
     for w in warnings:
         print("  ! " + w)
 
