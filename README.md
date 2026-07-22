@@ -231,3 +231,50 @@ Assumptions / when to intervene (linked mode):
 - Keep all `segNNNNN.mkv` beside `Fellowship.mkv`; mpv resolves the links by scanning
   siblings. Don't point a media server at this folder — it can't assemble editions.
 - More editions? Pass more `"Name=playlist.mpls"` args — one ordered edition each.
+
+## Why this is still a hack: the chicken-and-egg problem
+
+Editioned/branched MKVs remain a niche curiosity rather than a solved feature, and
+it's not an accident — it's a self-reinforcing deadlock:
+
+    no authoring tools  <-- no player support  <-- no media uses it  <-- no authoring tools
+
+Each link starves the next:
+
+- **Players don't implement it** because almost no one's library contains branched
+  MKVs, so there's no demand to justify the engineering.
+- **Nobody authors branched MKVs** because they won't play in the tools people
+  actually use — so why produce them?
+- **No automated authoring tool exists** for the same reason: a tool whose output
+  chokes 95% of players has no audience.
+
+### ffmpeg is the keystone
+
+Ordered chapters and segment linking aren't missing from "some players" — they're
+missing from **ffmpeg's Matroska demuxer (libavformat)**, and that's the whole
+ballgame. Jellyfin, Plex, Emby, Kodi, VLC, HandBrake and most transcoders demux
+through libavformat. So one absent feature in one library silently vetoes the entire
+downstream ecosystem at once. This is why the flat-file duplication path is the only
+thing that plays everywhere: it needs zero special demuxer support.
+
+### mpv is the lone exception, and here's why
+
+mpv (via its mplayer2/MPlayer lineage) wrote its **own** Matroska demuxer instead of
+using libavformat's, and implemented ordered chapters + hard/soft linking back in the
+mplayer2 era. The driver was the fansub/anime scene, which used linked segments to
+share common openings/endings across episodes without duplicating them. The feature
+exists in mpv only because *one* community had a concrete use case and *one* project
+controlled its own demuxer. Everywhere else it dead-ended at the shared library.
+
+### What would actually break the loop
+
+Only two things, neither likely:
+
+1. **ffmpeg implements ordered chapters in libavformat** — this unblocks the whole
+   downstream ecosystem in one stroke, but faces near-zero demand pressure (the
+   chicken-and-egg again).
+2. **Enough people hand-author these** that demand becomes visible to player devs.
+
+Until then the pragmatic answer stands: **mpv for the real branched experience,
+flat duplicated files (`--mode flat`) for everything else.** This toolkit just makes
+both cheap to produce — it can't vote ffmpeg a new feature.
