@@ -232,6 +232,25 @@ Assumptions / when to intervene (linked mode):
   siblings. Don't point a media server at this folder — it can't assemble editions.
 - More editions? Pass more `"Name=playlist.mpls"` args — one ordered edition each.
 
+### Any edition structure is supported (not just 1:1 swaps)
+
+There's no "swap skeleton" assumption. Each edition is just *its own* playlist's clip
+list, in *its own* order, so all of these work — including combinations:
+
+- **Swapped segments** — theatrical `0003` replaced by extended `0011` at the same slot.
+- **Purely additional segments** — extended has 13 where theatrical had 10; segments
+  that never appear in the theatrical cut are picked up fine.
+- **Reordered segments** — same clips in a different order, e.g. `0001 0002 0003`
+  vs `0001 0003 0002`.
+- **Repeated segments** — a clip referenced more than once, at any position.
+
+In `flat` mode each edition is appended in its own play order; in `linked` mode the
+script takes the **union** of unique clip ids (remuxed once), then each edition emits
+ordered-chapter atoms in its own order. The only thing that matters is *which clip ids
+a playlist references, in what order* — exactly what the `.mpls` provides. (The
+whole-clip caveat above still applies to partial references; reordering/adding whole
+clips is always safe.)
+
 ## Why this is still a hack: the chicken-and-egg problem
 
 Editioned/branched MKVs remain a niche curiosity rather than a solved feature, and
