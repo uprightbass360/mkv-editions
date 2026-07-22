@@ -1,0 +1,8 @@
+# generator output
+out/
+*.mkv
+chapters.xml
+build.sh
+
+__pycache__/
+*.pyc
