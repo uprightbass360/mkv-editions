@@ -1,11 +1,11 @@
-# Snipe aobikari features into mkv-editions
+# Adopt aobikari features into mkv-editions
 
 Source: https://codeberg.org/arch1t3cht/aobikari (arch1t3cht, C++/libbluray, LGPL-2.1).
 aobikari remuxes seamless-branching BDs where branching is done via **angles** in a
 single playlist, producing one combined m2ts (PES timestamps rewritten) plus a
 chapters.xml with one in-file ordered edition per angle - the "Xin1" architecture.
 
-We snipe four things; we do NOT snipe libbluray, PES rewriting, or `--padding`.
+We adopt four things; we do NOT take libbluray, PES rewriting, or `--padding`.
 
 ## 1. Multi-angle MPLS parsing + auto-expand
 
