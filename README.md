@@ -298,6 +298,8 @@ Verified end-to-end with **ffmpeg 6.1 + mkvmerge v82 + mpv 0.37**:
 - **`--preserve-chapters`** → flat cuts get 8/10 chapters at the mark positions; linked cuts
   interleave visible disc chapters with hidden segment joins (first chapter visible at 0).
 - **`--qpfile`** → Extended seam list `96 192 312 408 528 624` = exact frame joins at 24 fps.
+  Fed through **x264 0.164 and x265 3.5** (`--qpfile`), both accept the format and place IDR
+  frames at exactly `0 96 192 312 408 528 624` — seams land on keyframes, so re-encoded cuts stay seamless.
 
 Note on the element name: the current Matroska spec renamed the *binary* element to
 `ChapterSegmentUUID`, but MKVToolNix's chapter **XML** still uses `ChapterSegmentUID`
