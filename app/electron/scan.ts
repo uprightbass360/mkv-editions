@@ -11,8 +11,15 @@ export function scanDisc(
   cacheDir: string,
   onProgress: (p: ScanProgress) => void,
 ): Promise<ScanResult> {
-  const { python, script } = resolveCli()
   return new Promise((resolve) => {
+    let python: string
+    let script: string
+    try {
+      ;({ python, script } = resolveCli())
+    } catch (e) {
+      resolve({ ok: false, error: String((e as Error).message || e) })
+      return
+    }
     const child = spawn(python, [script, bdmv, '--scan-json', '--fast', '--cache', cacheDir])
     let out = ''
     let err = ''

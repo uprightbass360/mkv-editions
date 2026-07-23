@@ -32,7 +32,7 @@ function registerBuildProtocol() {
     let pathname = decodeURIComponent(url.pathname)
     if (pathname === '/' || pathname === '') pathname = '/index.html'
     const filePath = path.normalize(path.join(BUILD_DIR, pathname))
-    if (!filePath.startsWith(BUILD_DIR)) return new Response('Forbidden', { status: 403 })
+    if (!(filePath === BUILD_DIR || filePath.startsWith(BUILD_DIR + path.sep))) return new Response('Forbidden', { status: 403 })
     try {
       const data = await fs.readFile(filePath)
       const type = MIME_TYPES[path.extname(filePath)] ?? 'application/octet-stream'

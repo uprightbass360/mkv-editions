@@ -55,4 +55,8 @@ describe('mkvedproj serialization round-trips', () => {
   it('rejects a wrong version', () => {
     expect(() => fromMkvedproj({ version: 2 })).toThrow(/version/)
   })
+
+  it('rejects editions that are not an array', () => {
+    expect(() => fromMkvedproj({ version: 1, bdmv: 'x', title: 't', mode: 'flat', editions: 'nope' })).toThrow(/array/)
+  })
 })

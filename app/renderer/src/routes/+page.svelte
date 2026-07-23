@@ -18,20 +18,34 @@
     if (!bdmv) return
     scanning = true
     progress = 'scanning...'
-    const off = window.api.onScanProgress((p) => { progress = `probing ${p.clip} (${p.done}/${p.total})` })
-    const res = await window.api.scanDisc(bdmv)
-    off()
-    scanning = false
-    if (!res.ok) { progress = 'scan failed: ' + res.error; return }
-    model = res.data as DiscModel
-    let p = newProject(model.bdmv)
-    const feat = longestRealPlaylist(model)
-    if (feat) {
-      const pl = model.playlists.find((x) => x.file === feat)!
-      p = importPlaylist(p, pl)
-      progress = `scan complete - suggested feature ${feat}`
-    } else progress = 'scan complete'
-    project = p
+    let off: (() => void) | undefined
+    try {
+      off = window.api.onScanProgress((p) => { progress = `probing ${p.clip} (${p.done}/${p.total})` })
+      const res = await window.api.scanDisc(bdmv)
+      if (!res.ok) { progress = 'scan failed: ' + res.error; return }
+      model = res.data as DiscModel
+      let p = newProject(model.bdmv)
+      const feat = longestRealPlaylist(model)
+      if (feat) {
+        const pl = model.playlists.find((x) => x.file === feat)!
+        p = importPlaylist(p, pl)
+        progress = `scan complete - suggested feature ${feat}`
+      } else progress = 'scan complete'
+      project = p
+    } finally {
+      off?.()
+      scanning = false
+    }
+  }
+
+  async function pickAndOpen() {
+    const r = await window.api.openProject()
+    if (!r || !r.ok) return
+    try {
+      project = fromMkvedproj(r.json)
+    } catch (e) {
+      progress = 'open failed: ' + String((e as Error).message || e)
+    }
   }
 
   function apply(fn: (p: Project) => Project) { if (project) project = fn(project) }
@@ -43,6 +57,7 @@
 
 <header class="flex items-center gap-2.5 border-b border-slate-700 p-2">
   <button class="rounded bg-indigo-600 px-3 py-1" onclick={pickAndScan} disabled={scanning}>Open BDMV...</button>
+  <button class="rounded bg-slate-700 px-2 py-1" onclick={pickAndOpen}>Open project...</button>
   {#if project}
     <input class="bg-slate-800 px-1" bind:value={project.title} />
     <select class="bg-slate-800" bind:value={project.mode}>
@@ -50,10 +65,6 @@
     </select>
     <label><input type="checkbox" bind:checked={project.preserve_chapters} /> preserve chapters</label>
     <button class="rounded bg-slate-700 px-2 py-1" onclick={async () => { if (project) await window.api.saveProject(toMkvedproj(project), project.title) }}>Save project...</button>
-    <button class="rounded bg-slate-700 px-2 py-1" onclick={async () => {
-      const r = await window.api.openProject()
-      if (r && r.ok) project = fromMkvedproj(r.json)
-    }}>Open project...</button>
   {/if}
   <span class="ml-auto text-xs opacity-70">{progress}</span>
 </header>

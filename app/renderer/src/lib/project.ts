@@ -66,6 +66,7 @@ export function fromMkvedproj(json: any): Project {
   for (const k of ['bdmv', 'title', 'mode', 'editions']) {
     if (!(k in json)) throw new Error('missing ' + k)
   }
+  if (!Array.isArray(json.editions)) throw new Error('editions must be an array')
   return {
     bdmv: json.bdmv, title: json.title, mode: json.mode,
     preserve_chapters: !!json.preserve_chapters, qpfile: !!json.qpfile,
