@@ -347,6 +347,69 @@ def compute_slots(clip_streams):
     return out
 
 
+def clip_track_opts(streams, tracks_sel, tracks):
+    """mkvmerge options placed before ONE input file, realizing the project's
+    slot selection on this clip. TIDs come from matching the STN PID against
+    mkvmerge -J properties.number; if a PID is missing, fall back to pairing
+    the k-th STN stream of a kind with mkvmerge's k-th track of that type.
+    Video is always kept."""
+    keep = {t["slot"]: t for t in tracks_sel if t.get("keep")}
+    by_pid = {t["pid"]: t["tid"] for t in tracks if t.get("pid") is not None}
+    typed = {"audio": [t["tid"] for t in tracks if t["type"] == "audio"],
+             "subtitle": [t["tid"] for t in tracks if t["type"] == "subtitles"]}
+    seen, aud, sub, extra = {}, [], [], []
+    for sid, s in slot_ids_for_clip(streams):
+        if sid is None:
+            continue
+        k = seen.get(s["kind"], 0)
+        seen[s["kind"]] = k + 1
+        sel = keep.get(sid)
+        if not sel:
+            continue
+        tid = by_pid.get(s["pid"])
+        if tid is None:
+            lst = typed.get(s["kind"], [])
+            tid = lst[k] if k < len(lst) else None
+        if tid is None:
+            continue
+        (aud if s["kind"] == "audio" else sub).append(tid)
+        lang = sel.get("lang") or s["lang"]
+        if lang:
+            extra.append(f"--language {tid}:{lang}")
+        if "default" in sel:
+            extra.append(
+                f"--default-track-flag {tid}:{1 if sel['default'] else 0}")
+    opts = ["--audio-tracks " + ",".join(map(str, sorted(aud)))
+            if aud else "--no-audio",
+            "--subtitle-tracks " + ",".join(map(str, sorted(sub)))
+            if sub else "--no-subtitles"]
+    return opts + extra
+
+
+def check_track_layout(editions, tracks_sel, clip_streams, mode):
+    """A selected slot missing from a clip corrupts appends (mkvmerge pairs
+    tracks by order/type). Fatal for flat/xin1; a warning for linked, which
+    never appends."""
+    selected = [t["slot"] for t in tracks_sel if t.get("keep")]
+    warns, seen = [], set()
+    for name, items, _m in editions:
+        for c, _i, _o in items:
+            have = {sid for sid, _s in slot_ids_for_clip(
+                clip_streams.get(c, []))}
+            for sid in selected:
+                if sid in have:
+                    continue
+                msg = (f'edition "{name}": clip {c} has no {sid} stream - '
+                       "appending would mis-pair tracks")
+                if msg in seen:
+                    continue
+                seen.add(msg)
+                if mode in ("flat", "xin1"):
+                    sys.exit("ERROR: " + msg)
+                warns.append(msg)
+    return warns
+
+
 def edition_mark_positions(items, item_marks, clipinfo):
     """Chapter-mark timestamps mapped onto this edition's virtual timeline.
     item_marks is parallel to items, so each occurrence contributes only its
@@ -370,6 +433,15 @@ def unique_clips(editions):
                 seen.add(c)
                 order.append(c)
     return order
+
+
+def input_spec(stream, clip, clip_opts):
+    """One mkvmerge input: its per-clip track options (if any) followed by the
+    quoted path. Shared by all three modes so option emission lives in one
+    place."""
+    q = shlex.quote(os.path.join(stream, f"{clip}.m2ts"))
+    o = " ".join(clip_opts.get(clip, [])) if clip_opts else ""
+    return f"{o} {q}".strip()
 
 
 def write_qpfile(path, clips, clipinfo):
@@ -635,14 +707,15 @@ def editions_xml(editions, clipinfo, preserve, atom_fn):
 # ---------------------------------------------------------------------------
 # flat mode
 # ---------------------------------------------------------------------------
-def build_flat(stream, out_dir, title, editions, clipinfo, preserve, qpfile):
+def build_flat(stream, out_dir, title, editions, clipinfo, preserve, qpfile,
+               clip_opts=None):
     lines = ["#!/usr/bin/env bash", "set -euo pipefail", "",
              "# flat mode: each cut is a real linear track -> plays on Plex/Jellyfin/Emby.",
              "# Shared video is duplicated across files (unavoidable for ffmpeg players).", ""]
     outputs = []
     for name, items, marks in editions:
-        srcs = [os.path.join(stream, f"{c}.m2ts") for c, _i, _o in items]
-        appended = " + ".join(shlex.quote(s) for s in srcs)
+        appended = " + ".join(input_spec(stream, c, clip_opts)
+                              for c, _i, _o in items)
         outfn = f"{title} {{edition-{name}}}.mkv"
         outputs.append(outfn)
 
@@ -672,10 +745,11 @@ def build_flat(stream, out_dir, title, editions, clipinfo, preserve, qpfile):
 # ---------------------------------------------------------------------------
 # linked mode (ordered chapters + segment linking)
 # ---------------------------------------------------------------------------
-def build_linked(stream, out_dir, title, editions, clipinfo, preserve):
+def build_linked(stream, out_dir, title, editions, clipinfo, preserve,
+                 clip_opts=None):
     order = unique_clips(editions)
     remux = [f"mkvmerge -o seg{c}.mkv --no-chapters --segment-uid 0x{uid_for(c)} "
-             f"{shlex.quote(os.path.join(stream, f'{c}.m2ts'))}" for c in order]
+             f"{input_spec(stream, c, clip_opts)}" for c in order]
 
     def atom_fn(clip, start, end, hidden, label):
         return atom_xml(start, end, hidden, label, seg_uid=uid_for(clip))
@@ -702,7 +776,8 @@ def build_linked(stream, out_dir, title, editions, clipinfo, preserve):
 # ---------------------------------------------------------------------------
 # xin1 mode (one file, in-file ordered-chapter editions)
 # ---------------------------------------------------------------------------
-def build_xin1(stream, out_dir, title, editions, clipinfo, preserve, qpfile):
+def build_xin1(stream, out_dir, title, editions, clipinfo, preserve, qpfile,
+               clip_opts=None):
     order = unique_clips(editions)
     poff, off = {}, 0                 # physical ns offset of each clip in the file
     for c in order:
@@ -717,8 +792,7 @@ def build_xin1(stream, out_dir, title, editions, clipinfo, preserve, qpfile):
     open(os.path.join(out_dir, "tags.xml"), "w").write(tags)
 
     outfn = f"{title}.mkv"
-    appended = " + ".join(shlex.quote(os.path.join(stream, f"{c}.m2ts"))
-                          for c in order)
+    appended = " + ".join(input_spec(stream, c, clip_opts) for c in order)
     lines = ["#!/usr/bin/env bash", "set -euo pipefail", "",
              "# xin1 mode: every unique clip stored ONCE in one file; each edition is",
              "# an ordered-chapter timeline seeking inside it. Alternate cuts are",
@@ -821,16 +895,23 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     warnings = vc1_warnings(clipinfo, mode)
+    clip_opts = None
+    if tracks_sel:
+        warnings += check_track_layout(editions, tracks_sel, cstreams, mode)
+        clip_opts = {c: clip_track_opts(cstreams.get(c, []), tracks_sel,
+                                        probes[c]["tracks"])
+                     for c in probes}
     if mode == "flat":
         script, outputs = build_flat(stream, out_dir, title, editions, clipinfo,
-                                     preserve, qpfile)
+                                     preserve, qpfile, clip_opts=clip_opts)
         summary = "\n".join(f"  {o}" for o in outputs)
     elif mode == "xin1":
         script, outfn = build_xin1(stream, out_dir, title, editions, clipinfo,
-                                   preserve, qpfile)
+                                   preserve, qpfile, clip_opts=clip_opts)
         summary = f"  {outfn} (one file, ordered-chapter editions) - alternate cuts mpv only"
     else:
-        script, w = build_linked(stream, out_dir, title, editions, clipinfo, preserve)
+        script, w = build_linked(stream, out_dir, title, editions, clipinfo, preserve,
+                                 clip_opts=clip_opts)
         warnings += w
         summary = f"  {title}.mkv (+ seg*.mkv, chapters.xml, tags.xml) - mpv only"
 
