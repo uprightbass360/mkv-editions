@@ -15,6 +15,7 @@ declare global {
     ping: () => Promise<string>
     scanDisc: (bdmv: string) => Promise<ScanResult>
     onScanProgress: (cb: (p: ScanProgress) => void) => () => void
+    pickBdmv: () => Promise<string | null>
   }
 
   interface Window {

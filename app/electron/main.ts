@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, protocol } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, protocol } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { scanDisc } from './scan'
@@ -47,6 +47,11 @@ ipcMain.handle('ping', () => `pong from main @ ${new Date().toISOString()}`)
 ipcMain.handle('scan', async (event, bdmv: string) => {
   const cacheDir = path.join(app.getPath('userData'), 'probe-cache')
   return scanDisc(bdmv, cacheDir, (p) => event.sender.send('scan:progress', p))
+})
+
+ipcMain.handle('pickBdmv', async () => {
+  const r = await dialog.showOpenDialog({ properties: ['openDirectory'] })
+  return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]
 })
 
 function createWindow() {
