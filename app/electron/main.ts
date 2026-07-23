@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, protocol } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { scanDisc } from './scan'
 
 // Built to CJS by tsup, so __dirname is available natively at runtime.
 const dirname = __dirname
@@ -42,6 +43,11 @@ function registerBuildProtocol() {
 }
 
 ipcMain.handle('ping', () => `pong from main @ ${new Date().toISOString()}`)
+
+ipcMain.handle('scan', async (event, bdmv: string) => {
+  const cacheDir = path.join(app.getPath('userData'), 'probe-cache')
+  return scanDisc(bdmv, cacheDir, (p) => event.sender.send('scan:progress', p))
+})
 
 function createWindow() {
   const win = new BrowserWindow({
