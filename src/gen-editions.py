@@ -375,7 +375,7 @@ def clip_track_opts(streams, tracks_sel, tracks):
         (aud if s["kind"] == "audio" else sub).append(tid)
         lang = sel.get("lang") or s["lang"]
         if lang:
-            extra.append(f"--language {tid}:{lang}")
+            extra.append("--language " + shlex.quote(f"{tid}:{lang}"))
         if "default" in sel:
             extra.append(
                 f"--default-track-flag {tid}:{1 if sel['default'] else 0}")

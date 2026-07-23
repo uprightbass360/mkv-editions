@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import sys
 
@@ -25,6 +26,8 @@ def proj(sample_bd, tmp_path, mode, clips, tracks):
 ENG_ONLY = [{"slot": "audio:eng:ac3:1", "keep": True, "default": True},
             {"slot": "audio:jpn:ac3:1", "keep": False}]
 WANT_JPN = [{"slot": "audio:jpn:ac3:1", "keep": True}]
+EVIL_LANG = "en; touch /tmp/pwned x"
+EVIL_LANG_SEL = [{"slot": "audio:eng:ac3:1", "keep": True, "lang": EVIL_LANG}]
 
 
 def test_clip_track_opts_unit(ge, sample_bd):
@@ -65,3 +68,18 @@ def test_mismatch_only_warns_in_linked(sample_bd, tmp_path):
     r = run_cli(["--project", pf, str(tmp_path / "o2")])
     assert r.returncode == 0, r.stderr
     assert "00031" in r.stdout
+
+
+def test_lang_override_is_shell_quoted(sample_bd, tmp_path):
+    """A project-supplied lang override with shell metacharacters must land in
+    build.sh as a single quoted token, not spliced in raw (would let it break
+    out of the mkvmerge command)."""
+    pf = proj(sample_bd, tmp_path, "flat", ["00001"], EVIL_LANG_SEL)
+    out = tmp_path / "out"
+    r = run_cli(["--project", pf, str(out)])
+    assert r.returncode == 0, r.stderr
+    script = (out / "build.sh").read_text()
+    # the whole "tid:lang" token must be wrapped in a single-quoted shell word
+    assert re.search(r"--language '[^']*" + re.escape(EVIL_LANG) + r"'", script)
+    # must never appear unquoted right after --language (would splice into build.sh)
+    assert not re.search(r"--language \d+:" + re.escape(EVIL_LANG), script)
