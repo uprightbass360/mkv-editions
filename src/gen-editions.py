@@ -278,6 +278,75 @@ def clip_marks_from(items, marks):
     return {c: tuple(sorted(v)) for c, v in out.items()}
 
 
+def sweep_playlists(bdmv):
+    """Parse every playlist in BDMV/PLAYLIST once. Returns (playlists,
+    clip_marks, clip_streams, warnings); marks and streams are unioned per
+    clip across playlists. A malformed .mpls becomes a warning, not a fatal
+    error (real discs carry menu/junk playlists)."""
+    pl_dir = os.path.join(bdmv, "PLAYLIST")
+    playlists, cmarks, cstreams, warns = [], {}, {}, []
+    for fn in sorted(os.listdir(pl_dir)):
+        if not fn.lower().endswith(".mpls"):
+            continue
+        try:
+            items, marks, streams = parse_mpls(os.path.join(pl_dir, fn))
+        except SystemExit as e:
+            warns.append({"kind": "mpls", "clips": [],
+                          "message": f"{fn}: {e}"})
+            continue
+        marks = [(pi, ts) for pi, ts in marks if pi < len(items)]
+        for c, offs in clip_marks_from(items, marks).items():
+            cmarks.setdefault(c, set()).update(offs)
+        for (clips, _i, _o), st in zip(items, streams):
+            for c in clips:                  # angle clips share the item's STN
+                cstreams.setdefault(c, st)
+        n_ang = max((len(cl) for cl, _i, _o in items), default=1)
+        stem = fn[:-5]
+        playlists.append({"file": fn, "angles": n_ang, "editions": [
+            {"name": stem if a == 0 else f"{stem} (Angle {a + 1})",
+             "clips": [cl[a] if a < len(cl) else cl[0] for cl, _i, _o in items]}
+            for a in range(n_ang)]})
+    return (playlists, {c: sorted(v) for c, v in cmarks.items()},
+            cstreams, warns)
+
+
+def slot_ids_for_clip(streams):
+    """[(slot_id|None, stream)] in STN order; video and unknown kinds get None.
+    Slot id = kind:lang:codec:ordinal - the ordinal separates e.g. a main and
+    a commentary track that share kind, language and codec."""
+    counter, out = {}, []
+    for s in streams:
+        if s["kind"] not in ("audio", "subtitle"):
+            out.append((None, s))
+            continue
+        base = (s["kind"], s["lang"] or "und", s["codec"])
+        counter[base] = counter.get(base, 0) + 1
+        out.append((f"{base[0]}:{base[1]}:{base[2]}:{counter[base]}", s))
+    return out
+
+
+def compute_slots(clip_streams):
+    """Union per-clip slot ids into project-wide slots with presence info."""
+    present, order = {}, []
+    for clip in sorted(clip_streams):
+        for sid, _s in slot_ids_for_clip(clip_streams[clip]):
+            if sid is None:
+                continue
+            if sid not in present:
+                present[sid] = set()
+                order.append(sid)
+            present[sid].add(clip)
+    every = set(clip_streams)
+    out = []
+    for sid in order:
+        kind, lang, codec, ordn = sid.split(":")   # ids never contain extra colons
+        out.append({"id": sid, "kind": kind, "lang": lang, "codec": codec,
+                    "ordinal": int(ordn),
+                    "present_in": sorted(present[sid]),
+                    "missing_from": sorted(every - present[sid])})
+    return out
+
+
 def edition_mark_positions(items, item_marks, clipinfo):
     """Chapter-mark timestamps mapped onto this edition's virtual timeline.
     item_marks is parallel to items, so each occurrence contributes only its
@@ -650,12 +719,54 @@ def build_xin1(stream, out_dir, title, editions, clipinfo, preserve, qpfile):
     return "\n".join(lines) + "\n", outfn
 
 
+def run_scan(args):
+    bdmv = args.bdmv
+    playlists, cmarks, cstreams, warns = sweep_playlists(bdmv)
+    stream_dir = os.path.join(bdmv, "STREAM")
+    order = []
+    for pl in playlists:
+        for ed in pl["editions"]:
+            for c in ed["clips"]:
+                if c not in order:
+                    order.append(c)
+    clips = {}
+    for done, c in enumerate(order, 1):
+        path = os.path.join(stream_dir, f"{c}.m2ts")
+        if not os.path.exists(path):
+            warns.append({"kind": "missing", "clips": [c],
+                          "message": f"missing clip: {path}"})
+            continue
+        p = probe_clip(path, fast=args.fast, cache_dir=args.cache)
+        print(json.dumps({"type": "progress", "clip": c,
+                          "done": done, "total": len(order)}),
+              file=sys.stderr, flush=True)
+        clips[c] = {"path": os.path.abspath(path), "frames": p["frames"],
+                    "fps": p["fps"], "dur_ns": p["dur_ns"],
+                    "codec": p["codec"], "exact": p["frames"] is not None,
+                    "marks_ns": cmarks.get(c, []),
+                    "streams": cstreams.get(c, []), "tracks": p["tracks"]}
+    bad = sorted(c for c, d in clips.items() if d["codec"] == "vc1")
+    if bad:
+        warns.append({"kind": "vc1", "clips": bad,
+                      "message": "VC-1 video: mkvmerge skips one frame per "
+                                 "append splice (mkvtoolnix#6194) - prefer "
+                                 "--mode linked"})
+    print(json.dumps({"bdmv": os.path.abspath(bdmv), "clips": clips,
+                      "playlists": playlists,
+                      "slots": compute_slots(
+                          {c: clips[c]["streams"] for c in clips}),
+                      "warnings": warns}, indent=2))
+
+
 def main():
     args = parse_args(sys.argv[1:])
     if args.seed is not None:
         random.seed(args.seed)
-    if args.scan or args.project:
-        sys.exit("scan/project: not implemented yet")   # replaced in Tasks 6/7
+    if args.scan:
+        run_scan(args)
+        return
+    if args.project:
+        sys.exit("project: not implemented yet")       # replaced in Task 7
     bdmv, out_dir, mode, title = args.bdmv, args.out_dir, args.mode, args.title
     preserve, qpfile, eds = args.preserve, args.qpfile, args.eds
     editions = load_editions(bdmv, eds)
