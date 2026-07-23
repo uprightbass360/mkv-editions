@@ -9,6 +9,7 @@
 
 <div class="flex flex-col gap-1 overflow-y-auto">
   {#each clips as c (c.id)}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="flex gap-2 rounded border border-slate-600 px-1.5 py-1 text-xs {c.readable ? 'cursor-grab' : 'cursor-not-allowed opacity-50'}"
       draggable={c.readable}
