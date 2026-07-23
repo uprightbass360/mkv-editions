@@ -53,8 +53,9 @@ ClipInfo = namedtuple("ClipInfo", "frames num den dur codec")
 # .mpls parsing (PlayItems + chapter marks)
 # ---------------------------------------------------------------------------
 def parse_mpls(path):
-    """Return (items, marks): items=[(clips,in,out)] with one clip id per angle
-    (clips[0] = base angle), marks=[(playitem_idx,ts)]."""
+    """Return (items, marks, streams): items=[(clips,in,out)] with one clip id
+    per angle (clips[0] = base angle), marks=[(playitem_idx,ts)], streams[i] =
+    i-th PlayItem's STN stream list."""
     data = open(path, "rb").read()
     if data[0:4] != b"MPLS":
         sys.exit(f"{path}: not an MPLS file")
@@ -62,7 +63,7 @@ def parse_mpls(path):
     mark_start = int.from_bytes(data[12:16], "big")
 
     n_items = int.from_bytes(data[pl_start + 6:pl_start + 8], "big")
-    pos, items = pl_start + 10, []
+    pos, items, streams = pl_start + 10, [], []
     def clip_id(raw):
         if len(raw) != 5 or not raw.isdigit():
             sys.exit(f"{path}: malformed PlayItem (bad clip id {raw!r})")
@@ -73,6 +74,7 @@ def parse_mpls(path):
         it = data[pos + 2:pos + 2 + length]
         if len(it) < 20:
             sys.exit(f"{path}: malformed PlayItem ({len(it)} bytes)")
+        stn_off = 32
         clips = [clip_id(it[0:5])]
         if (it[10] >> 4) & 1:                    # is_multi_angle
             n_extra = it[32] - 1 if len(it) > 32 else -1
@@ -81,9 +83,11 @@ def parse_mpls(path):
             for a in range(n_extra):             # entries: clip(5)+codec(4)+stc(1)
                 off = 34 + 10 * a
                 clips.append(clip_id(it[off:off + 5]))
+            stn_off = 34 + 10 * n_extra
         items.append((clips,
                       int.from_bytes(it[12:16], "big"),
                       int.from_bytes(it[16:20], "big")))
+        streams.append(parse_stn(it, stn_off))
         pos += 2 + length
 
     marks = []
@@ -98,7 +102,55 @@ def parse_mpls(path):
                 marks.append((int.from_bytes(m[2:4], "big"),
                               int.from_bytes(m[4:8], "big")))
             mp += 14
-    return items, marks
+    return items, marks, streams
+
+
+STREAM_CODECS = {
+    0x01: ("video", "mpeg1"), 0x02: ("video", "mpeg2"),
+    0x1B: ("video", "h264"), 0xEA: ("video", "vc1"), 0x24: ("video", "hevc"),
+    0x80: ("audio", "pcm_bluray"), 0x81: ("audio", "ac3"),
+    0x82: ("audio", "dts"), 0x83: ("audio", "truehd"), 0x84: ("audio", "eac3"),
+    0x85: ("audio", "dts_hd"), 0x86: ("audio", "dts_hd_ma"),
+    0xA1: ("audio", "eac3_sec"), 0xA2: ("audio", "dts_sec"),
+    0x90: ("subtitle", "pgs"), 0x91: ("subtitle", "igs"),
+    0x92: ("subtitle", "text"),
+}
+
+
+def parse_stn(it, off):
+    """Parse the STN table at offset off inside a PlayItem. Tolerant: skips by
+    the length fields, keeps unknown coding types as kind "other", never reads
+    past the table. Returns primary video + audio + PG streams."""
+    if off + 4 > len(it):
+        return []
+    end = min(off + 2 + int.from_bytes(it[off:off + 2], "big"), len(it))
+    p = off + 4
+    if p + 12 > end:
+        return []
+    n_v, n_a, n_pg = it[p], it[p + 1], it[p + 2]
+    p += 12
+    out = []
+    for _ in range(n_v + n_a + n_pg):
+        if p + 2 > end:
+            break
+        elen, etype = it[p], it[p + 1]
+        pid = (int.from_bytes(it[p + 2:p + 4], "big")
+               if etype == 1 and p + 4 <= end else None)
+        p += 1 + elen
+        if p + 2 > end:
+            break
+        alen, coding = it[p], it[p + 1]
+        kind, codec = STREAM_CODECS.get(coding, ("other", f"0x{coding:02x}"))
+        lang = None
+        if kind == "audio" and p + 6 <= end:
+            lang = it[p + 3:p + 6].decode("ascii", "replace")
+        elif codec == "pgs" and p + 5 <= end:
+            lang = it[p + 2:p + 5].decode("ascii", "replace")
+        elif codec == "text" and p + 6 <= end:
+            lang = it[p + 3:p + 6].decode("ascii", "replace")
+        p += 1 + alen
+        out.append({"pid": pid, "kind": kind, "codec": codec, "lang": lang})
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +317,7 @@ def load_editions(bdmv, eds):
     for name, mpls in eds:
         if not os.path.isabs(mpls) and not os.path.exists(mpls):
             mpls = os.path.join(bdmv, "PLAYLIST", mpls)
-        items, marks = parse_mpls(mpls)
+        items, marks, _streams = parse_mpls(mpls)
         n_ang = max((len(clips) for clips, _i, _o in items), default=1)
         if n_ang > 1:
             print(f"  {name}: {n_ang} angles -> {n_ang} editions")

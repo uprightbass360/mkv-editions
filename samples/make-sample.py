@@ -78,7 +78,22 @@ def make_segment(path, seg_id, tag, colour, dur, hz, langs):
     subprocess.run(cmd, check=True)
 
 
-def write_mpls(path, slots, durs):
+def stn_block(langs):
+    """Real-layout STN table: length(2), reserved(2), 12 count bytes, then one
+    entry per stream. Entry = stream_entry(len,type=1,PID,pad) followed by
+    stream_attributes(len, coding_type, ...). h264=0x1B, AC-3=0x81; PIDs match
+    what ffmpeg's m2ts mode actually writes (video 0x1011, audio 0x1100+k)."""
+    body = bytes([1, len(langs), 0, 0, 0, 0, 0]) + b"\x00" * 5
+    body += bytes([9, 1]) + struct.pack(">H", 0x1011) + b"\x00" * 6
+    body += bytes([5, 0x1B, 0x00]) + b"\x00" * 3
+    for k, lang in enumerate(langs):
+        body += bytes([9, 1]) + struct.pack(">H", 0x1100 + k) + b"\x00" * 6
+        body += bytes([5, 0x81, 0x03]) + lang.encode("ascii")
+    after = b"\x00\x00" + body
+    return struct.pack(">H", len(after)) + after
+
+
+def write_mpls(path, slots, durs, langmap):
     """MPLS with real full-layout PlayItems (IN=0, OUT=duration) and a chapter
     mark 2s into each segment (PlayListMark), so --preserve-chapters has data
     to read. A slot given as a tuple is multi-angle: one clip per angle."""
@@ -97,6 +112,7 @@ def write_mpls(path, slots, durs):
             it += bytes([len(clips), 0x00])             # angle count, angle flags
             for c in clips[1:]:
                 it += c.encode() + b"M2TS" + b"\x00"    # clip, codec, stc_id
+        it += stn_block(langmap[clips[0]])
         items += struct.pack(">H", len(it)) + it
     pl_after = struct.pack(">H", 0) + struct.pack(">H", len(slots)) + struct.pack(">H", 0) + items
     playlist_block = struct.pack(">I", len(pl_after)) + pl_after
@@ -131,10 +147,10 @@ def main(out_dir=None):
         durs[seg_id] = dur
         langmap[seg_id] = langs
 
-    write_mpls(os.path.join(playlist, "00001.mpls"), THEATRICAL, durs)
-    write_mpls(os.path.join(playlist, "00002.mpls"), EXTENDED, durs)
-    write_mpls(os.path.join(playlist, "00003.mpls"), ANGLED, durs)
-    write_mpls(os.path.join(playlist, "00004.mpls"), MISMATCH, durs)
+    write_mpls(os.path.join(playlist, "00001.mpls"), THEATRICAL, durs, langmap)
+    write_mpls(os.path.join(playlist, "00002.mpls"), EXTENDED, durs, langmap)
+    write_mpls(os.path.join(playlist, "00003.mpls"), ANGLED, durs, langmap)
+    write_mpls(os.path.join(playlist, "00004.mpls"), MISMATCH, durs, langmap)
 
     def slot_str(s):
         return s if isinstance(s, str) else "[" + "|".join(s) + "]"
