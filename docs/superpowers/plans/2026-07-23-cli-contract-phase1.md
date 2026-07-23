@@ -350,7 +350,16 @@ git commit -m "STN table: emit in sample MPLS, parse in gen-editions (PID/codec/
 
 **Interfaces:**
 - Consumes: `parse_mpls` 3-tuple return.
-- Produces: `clip_marks_from(items, marks) -> {clip: (ns_offset, ...)}`; editions become `(name, ed_items, clip_marks)` where `clip_marks` maps clip id to sorted ns offsets; `edition_mark_positions(items, clip_marks, clipinfo)` (same name, second arg is now the dict).
+- Produces: `marks_by_item(items, marks) -> [ (ns, ...), ... ]` (parallel to `items`); `clip_marks_from(items, marks) -> {clip: (ns_offset, ...)}` (for the scan model only); editions become `(name, ed_items, item_marks)` where `item_marks` is POSITIONAL, parallel to `ed_items`; `edition_mark_positions(items, item_marks, clipinfo)`.
+
+**Why positional, not keyed by clip:** a clip may appear more than once in one
+edition (repeated segments are a documented supported case). Keying marks by
+clip id alone makes the second occurrence inherit the first's chapters, which
+invents a chapter the disc author never wrote and breaks this task's
+byte-identical invariant. Positional marks keep each occurrence's own marks.
+`clip_marks_from` still exists because the SCAN model needs per-clip marks: an
+authored edition has no PlayItem indices, so there its marks attach to clips,
+and every occurrence intentionally gets them.
 
 - [ ] **Step 1: Write the failing test** (`tests/test_marks.py`)
 
@@ -360,26 +369,41 @@ def synth_clipinfo(ge, items):
             for c, _i, _o in items}
 
 
-def test_marks_rekeyed_per_clip(ge, sample_bd):
-    eds = ge.load_editions(str(sample_bd), [("T", "00001.mpls")])
-    _n, items, cm = eds[0]
-    assert cm["00001"] == (2 * ge.NS,)     # mark 2s into every sample clip
-    pos = ge.edition_mark_positions(items, cm, synth_clipinfo(ge, items))
+def test_marks_are_positional(ge, sample_bd):
+    _n, items, im = ge.load_editions(str(sample_bd), [("T", "00001.mpls")])[0]
+    assert im == [(2 * ge.NS,)] * 5        # mark 2s into every sample clip
+    pos = ge.edition_mark_positions(items, im, synth_clipinfo(ge, items))
     assert pos == [2 * ge.NS, 6 * ge.NS, 10 * ge.NS, 14 * ge.NS, 18 * ge.NS]
 
 
+def test_repeated_clip_does_not_inherit_marks(ge):
+    # A clip appearing twice must NOT gain the other occurrence's chapters:
+    # that would invent a chapter the disc author never wrote.
+    items = [("A", 0, 0), ("B", 0, 0), ("A", 0, 0)]
+    im = [(2 * ge.NS,), (), ()]            # disc marks only the FIRST A
+    ci = {c: ge.ClipInfo(None, 24, 1, 4 * ge.NS, "h264") for c in "AB"}
+    assert ge.edition_mark_positions(items, im, ci) == [2 * ge.NS]
+
+
 def test_marks_travel_when_resequenced(ge, sample_bd):
-    _n, items, cm = ge.load_editions(str(sample_bd), [("T", "00001.mpls")])[0]
+    # The authored path attaches a clip's marks to every occurrence, via
+    # clip_marks_from - that is what lets marks survive re-sequencing.
+    _n, items, _im = ge.load_editions(str(sample_bd), [("T", "00001.mpls")])[0]
+    raw_items, marks, _s = ge.parse_mpls(
+        str(sample_bd / "PLAYLIST" / "00001.mpls"))
+    cm = ge.clip_marks_from(raw_items, marks)
+    assert cm["00001"] == (2 * ge.NS,)
     resq = [items[2], items[0]]            # authored order: clip 3 then clip 1
-    pos = ge.edition_mark_positions(resq, cm, synth_clipinfo(ge, items))
+    im = [cm.get(c, ()) for c, _i, _o in resq]
+    pos = ge.edition_mark_positions(resq, im, synth_clipinfo(ge, items))
     assert pos == [2 * ge.NS, 6 * ge.NS]   # mark follows each clip
 
 
 def test_angle_marks_attach_to_all_angle_clips(ge, sample_bd):
-    eds = ge.load_editions(str(sample_bd), [("A", "00003.mpls")])
-    assert len(eds) == 2
-    _n, _items, cm = eds[1]                # Angle 2 edition
-    assert cm["00021"] == (2 * ge.NS,)
+    raw_items, marks, _s = ge.parse_mpls(
+        str(sample_bd / "PLAYLIST" / "00003.mpls"))
+    cm = ge.clip_marks_from(raw_items, marks)
+    assert cm["00021"] == (2 * ge.NS,)     # angle-2 clip gets the item's mark
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -392,10 +416,22 @@ Expected: FAIL - editions carry `[(pi, ts)]`, not a dict.
 Add after `parse_mpls`:
 
 ```python
+def marks_by_item(items, marks):
+    """Mark offsets within each PlayItem, positionally parallel to items, so a
+    playlist's marks stay bound to the occurrence that carried them (a clip may
+    appear more than once in one edition)."""
+    per = [set() for _ in items]
+    for pi, ts in marks:
+        _clips, in_t, _o = items[pi]
+        per[pi].add(int(round((ts - in_t) * NS / TICKS)))
+    return [tuple(sorted(s)) for s in per]
+
+
 def clip_marks_from(items, marks):
-    """Re-key playlist marks from PlayItem index to per-clip ns offsets, so a
-    mark travels with its clip when an authored edition re-sequences it. A
-    mark on a multi-angle item attaches to every angle's clip."""
+    """The same marks re-keyed by clip id, for the scan model: an authored
+    edition has no PlayItem indices, so its marks attach to clips and every
+    occurrence gets them. A mark on a multi-angle item attaches to every
+    angle's clip."""
     out = {}
     for pi, ts in marks:
         clips, in_t, _o = items[pi]
@@ -408,12 +444,13 @@ def clip_marks_from(items, marks):
 Rewrite `edition_mark_positions` (same name, drop-in at its current location):
 
 ```python
-def edition_mark_positions(items, clip_marks, clipinfo):
-    """Chapter-mark timestamps mapped onto this edition's virtual timeline:
-    each occurrence of a clip contributes that clip's marks at its offset."""
+def edition_mark_positions(items, item_marks, clipinfo):
+    """Chapter-mark timestamps mapped onto this edition's virtual timeline.
+    item_marks is parallel to items, so each occurrence contributes only its
+    own marks."""
     out, off = set(), 0
-    for clip, _i, _o in items:
-        for m in clip_marks.get(clip, ()):
+    for (clip, _i, _o), local in zip(items, item_marks):
+        for m in local:
             p = off + m
             if p > 0 and m < clipinfo[clip].dur:
                 out.add(p)
@@ -422,13 +459,14 @@ def edition_mark_positions(items, clip_marks, clipinfo):
 ```
 
 In `load_editions`: after the existing mark-validity filter, add
-`cm = clip_marks_from(items, marks)` and append `(ed_name, ed_items, cm)`
-instead of `(ed_name, ed_items, marks)`.
+`im = marks_by_item(items, marks)` and append `(ed_name, ed_items, im)`
+instead of `(ed_name, ed_items, marks)`. Note `marks_by_item` is computed from
+the FULL item list once and shared by every angle's edition, since all angles
+have the same PlayItem positions.
 
-In `main`, the summary print `len(m)` becomes
-`sum(len(v) for v in m.values())` (same numbers for playlist editions where
-each clip appears once). The `preserve and marks` truthiness checks in
-`build_flat` and `editions_xml` work unchanged on the dict.
+In `main`, the summary print `len(m)` becomes `sum(len(v) for v in m)`. The
+`preserve and marks` truthiness checks in `build_flat` and `editions_xml` work
+unchanged on a list (empty list is falsy, as an empty list of pairs was).
 
 - [ ] **Step 4: Run the full suite + a real build**
 
@@ -1055,8 +1093,10 @@ Restructure the top of `main` (after the seed handling and `run_scan` branch):
         for ed in p["editions"]:
             items = [(c, 0, int(round(clipinfo[c].dur * TICKS / NS)))
                      for c in ed["clips"]]
-            cm = {c: list(cmarks.get(c, [])) for c in ed["clips"]}
-            editions.append((ed["name"], items, cm))
+            # authored editions have no PlayItem indices: each occurrence of a
+            # clip gets that clip's disc marks (marks travel with the clip)
+            im = [tuple(cmarks.get(c, ())) for c in ed["clips"]]
+            editions.append((ed["name"], items, im))
         out_dir = args.out_dir
     else:
         bdmv, out_dir, mode, title = (args.bdmv, args.out_dir, args.mode,
