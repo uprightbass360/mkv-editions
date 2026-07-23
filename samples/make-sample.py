@@ -4,7 +4,7 @@ make-sample.py - generate a synthetic, decrypted-BD-style sample tree for
 validating gen-editions.py. No copyrighted material: every segment is a short
 solid-colour clip with its number burned in, plus a distinct sine tone.
 
-It builds three playlists that exercise every case at once:
+It builds four playlists that exercise every case at once:
   Theatrical (00001.mpls): 1 2 3 4 5
   Extended   (00002.mpls): 1 2 11 4 12 5 13
     -> 3 swapped for 11, 12 & 13 are extended-ONLY additions, positions shift.
@@ -15,8 +15,9 @@ It builds three playlists that exercise every case at once:
     -> 00031 has only one audio track (eng); exercises the append track-layout
        mismatch guard.
 
-All segments share identical codecs/resolution/tracks, so both mkvmerge append
-(flat/xin1) and mpv segment linking (linked) are valid.
+All segments share identical codecs/resolution (except 00031's audio track
+count), so both mkvmerge append (flat/xin1) and mpv segment linking (linked)
+are valid.
 
 Usage:
   make-sample.py [out_dir]            # default ./sample
