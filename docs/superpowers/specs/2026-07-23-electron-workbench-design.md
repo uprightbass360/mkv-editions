@@ -43,12 +43,19 @@ thumbnails, and streams results over IPC.
 
 ## CLI contract
 
-Two additive flags. Existing argv behavior is unchanged.
+Additive flags. Existing argv behavior is unchanged.
 
-### `--scan-json`
+### `--scan-json [--fast] [--cache DIR]`
 
 Parse the BDMV, ffprobe every clip, parse the STN table, write the disc model to
-stdout as JSON, and exit. Nothing is written to disk.
+stdout as JSON, and exit. Nothing is written to disk except the optional cache.
+
+Per-clip progress is emitted to **stderr** as JSON lines, so stdout stays a
+single clean JSON document:
+
+```
+{"type":"progress","clip":"00003","done":4,"total":9}
+```
 
 ```jsonc
 {
@@ -82,6 +89,28 @@ stdout as JSON, and exit. Nothing is written to disk.
                 "message": "VC-1 video (00004): mkvmerge skips one frame per append"}]
 }
 ```
+
+### Scanning real media
+
+On the synthetic sample a scan is instant. On a retail disc it is not, and the
+difference is structural rather than a matter of tuning. `frame_info` falls back
+to `ffprobe -count_frames` whenever `nb_frames` is absent, which for m2ts is
+essentially always, so a full scan frame-counts every clip on the disc: tens of
+gigabytes, minutes to tens of minutes. Three consequences:
+
+- **Two-pass scanning.** `--fast` skips frame counting and reports container
+  durations, with `"frames": null` and `"exact": false` per clip. The app runs
+  the fast pass first so the workbench is usable within seconds, then runs the
+  full pass in the background and upgrades the model in place.
+- **Frame-dependent features gate on the full pass.** `--qpfile` and frame-exact
+  boundaries require real frame counts, so those controls stay disabled, with a
+  visible reason, until the full scan completes. Authoring, reordering, and
+  track selection do not wait.
+- **Probe cache.** `--cache DIR` stores per-clip probe results keyed by path,
+  size, and mtime, and reuses them on later runs. The cache lives in the CLI, not
+  the app, so repeat CLI runs on the same disc benefit too. The app passes its
+  `userData` cache directory. A changed or replaced clip invalidates its own
+  entry only.
 
 A slot id is `kind:lang:codec:ordinal`, where the ordinal disambiguates streams
 sharing all three other fields, assigned by order of appearance in the clip's STN
@@ -211,7 +240,8 @@ placeholder chip and is otherwise fully usable.
 One `Project` object: `{bdmv, title, mode, flags, editions, tracks}`. Serialized,
 it is the `.mkvedproj`. The clip library, thumbnails, slots, and warnings are all
 derived from the scan and never edited, so scan results and project state stay
-cleanly separated. Reopening a project re-runs the scan against the same disc.
+cleanly separated. Reopening a project re-scans the disc, but the probe cache
+makes that cheap; only clips that changed on disk are re-probed.
 
 ## Build execution
 
@@ -233,8 +263,8 @@ Two phases, because the first is independently useful and independently
 testable without any GUI:
 
 1. **CLI contract.** Per-clip mark re-keying, STN table parsing, seedable UIDs,
-   track flags in build.sh, `--scan-json`, `--project`, sample generator audio,
-   and the pytest suite. At the end of this phase the CLI alone can build an
+   track flags in build.sh, `--scan-json` with `--fast`, `--cache`, and stderr
+   progress, `--project`, sample generator audio, and the pytest suite. At the end of this phase the CLI alone can build an
    arbitrary authored edition from a hand-written `.mkvedproj`.
 2. **Electron app.** Scaffold, IPC, scan and thumbnail plumbing, workbench UI,
    track panel, build runner, renderer tests, smoke test.
@@ -252,8 +282,12 @@ not change validated behavior.
   one clip deliberately missing the second track so the append-mismatch block is
   exercised. Today's sample is video-only, so the audio path has never been
   tested in this repo.
+- pytest over the probe cache: a warm run re-probes nothing, a clip whose mtime
+  or size changed is re-probed and its neighbours are not, and `--fast` output
+  matches the full pass except for `frames` and `exact`.
 - vitest over renderer logic: project model, ordering, divergence computation,
-  validation rules.
+  validation rules, and the fast-to-full model upgrade leaving authored editions
+  untouched.
 - One Electron smoke test: launch, scan the sample, build, assert two ordered
   editions in the output.
 
