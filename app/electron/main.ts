@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, protocol } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { scanDisc } from './scan'
+import { writeProjectFile, readProjectFile } from './project-io'
 
 // Built to CJS by tsup, so __dirname is available natively at runtime.
 const dirname = __dirname
@@ -52,6 +53,19 @@ ipcMain.handle('scan', async (event, bdmv: string) => {
 ipcMain.handle('pickBdmv', async () => {
   const r = await dialog.showOpenDialog({ properties: ['openDirectory'] })
   return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]
+})
+
+ipcMain.handle('saveProject', async (_e, json: unknown, title: string) => {
+  const r = await dialog.showSaveDialog({ defaultPath: `${title || 'movie'}.mkvedproj` })
+  if (r.canceled || !r.filePath) return { ok: false, error: 'cancelled' }
+  try { await writeProjectFile(r.filePath, json); return { ok: true, path: r.filePath } }
+  catch (e) { return { ok: false, error: String(e) } }
+})
+ipcMain.handle('openProject', async () => {
+  const r = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: 'mkvedproj', extensions: ['mkvedproj', 'json'] }] })
+  if (r.canceled || r.filePaths.length === 0) return null
+  try { return { ok: true, json: await readProjectFile(r.filePaths[0]) } }
+  catch (e) { return { ok: false, error: String(e) } }
 })
 
 function createWindow() {

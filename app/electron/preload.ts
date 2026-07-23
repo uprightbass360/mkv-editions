@@ -8,7 +8,9 @@ const api = {
     ipcRenderer.on('scan:progress', h)
     return () => ipcRenderer.removeListener('scan:progress', h)
   },
-  pickBdmv: (): Promise<string | null> => ipcRenderer.invoke('pickBdmv')
+  pickBdmv: (): Promise<string | null> => ipcRenderer.invoke('pickBdmv'),
+  saveProject: (json: unknown, title: string) => ipcRenderer.invoke('saveProject', json, title),
+  openProject: () => ipcRenderer.invoke('openProject')
 }
 
 contextBridge.exposeInMainWorld('api', api)

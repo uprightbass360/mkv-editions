@@ -5,7 +5,7 @@
   import { libraryClips, playlistRows, longestRealPlaylist, type DiscModel } from '$lib/model'
   import {
     newProject, addEdition, appendClip, removeClip, renameEdition, importPlaylist,
-    sharedClipIds, type Project,
+    sharedClipIds, toMkvedproj, fromMkvedproj, type Project,
   } from '$lib/project'
 
   let model = $state<DiscModel | null>(null)
@@ -49,6 +49,11 @@
       <option value="flat">flat</option><option value="linked">linked</option><option value="xin1">xin1</option>
     </select>
     <label><input type="checkbox" bind:checked={project.preserve_chapters} /> preserve chapters</label>
+    <button class="rounded bg-slate-700 px-2 py-1" onclick={async () => { if (project) await window.api.saveProject(toMkvedproj(project), project.title) }}>Save project...</button>
+    <button class="rounded bg-slate-700 px-2 py-1" onclick={async () => {
+      const r = await window.api.openProject()
+      if (r && r.ok) project = fromMkvedproj(r.json)
+    }}>Open project...</button>
   {/if}
   <span class="ml-auto text-xs opacity-70">{progress}</span>
 </header>
