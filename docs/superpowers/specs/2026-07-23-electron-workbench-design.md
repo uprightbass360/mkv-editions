@@ -117,6 +117,36 @@ sharing all three other fields, assigned by order of appearance in the clip's ST
 table. Discs commonly carry two English AC3 tracks (main and commentary), so
 without the ordinal the key would collide and the two would be indistinguishable.
 
+### What a real retail disc actually looks like (validated 2026-07-23)
+
+Phase 1 was validated against Blade Runner 2049 3D (decrypted UDF ISO,
+loop-mounted). The measured reality differs from the synthetic sample in ways the
+app must handle:
+
+- **Scale and decoys.** 169 playlists, 182 clips. Only a handful are real; the
+  rest are anti-rip decoys. Some decoy playlists have 101 PlayItems cycling
+  between 2 clips. The feature is one 27.6 GB clip reached by two playlists (a
+  plain single-clip one and a 2-angle one). A UI that lists every playlist and
+  every clip flat is unusable on a disc like this - see "Disc scale" under UI.
+- **`--fast` is not optional, it is the default path.** The full disc scanned in
+  14 seconds with `--fast`; a non-fast scan would frame-count the 27.6 GB feature
+  and every decoy. The app always runs `--fast` first and only escalates specific
+  clips to a full probe when a frame-dependent feature needs them.
+- **Orphan and corrupt clips exist and must not break the scan.** Clips
+  referenced by no playlist (a 14 GB orphan here) are simply not probed. At least
+  one clip decoded to garbage (`mkvmerge -J` returns zero tracks); the scan
+  records it with an empty `streams`/`tracks` list rather than failing. The app
+  must render a zero-track clip as unusable, not crash.
+- **3D discs yield 2D editions.** A 3D BD stores the MVC dependent view in
+  `STREAM/SSIF/*.ssif`; `STREAM/*.m2ts` are the 2D base views the tool consumes.
+  This is in scope as-is: the app builds 2D editions and ignores SSIF. It should
+  say so rather than imply 3D output.
+- **Some discs report languages at the stream level.** On this disc `mkvmerge -J`
+  already returned `eng`/`spa` per track, so languages appeared without our STN
+  `--language` flags. The scan still reads languages from the STN table (the
+  reliable source); when both are present they agreed. The app treats the scan's
+  `lang` as authoritative and does not depend on mkvmerge echoing it.
+
 ### `--project FILE.mkvedproj`
 
 Read title, mode, flags, editions, and track selection from JSON instead of
@@ -226,6 +256,31 @@ only a warning, because linked never appends.
   span mismatch; a blocking startup banner when `mkvmerge`, `ffprobe`, or
   `python3` is missing, mirroring `mkv-editions.sh`.
 
+### Disc scale and decoy playlists
+
+The synthetic sample has 4 playlists and 9 clips; a retail disc has ~170
+playlists and ~180 clips, most of them decoys. The mockup above assumed a small
+disc; on a real one the clip library and playlist list must stay navigable:
+
+- **The clip library shows clips referenced by at least one playlist, sorted by
+  duration descending by default**, so the feature and real extras surface at the
+  top and the tiny decoy/menu loops sink. Orphan clips (referenced by nothing)
+  are hidden by default behind a "show N unreferenced" toggle. A zero-track
+  (corrupt) clip is shown greyed with an "unreadable" badge and cannot be dragged
+  into an edition.
+- **Playlist import is a searchable, duration-sorted list, not a flat menu.**
+  Each entry shows duration, item count, and unique-clip count, so a 2:41 / 1 clip
+  feature is obviously distinct from a 1:18 / 101 item / 2 clip decoy. Playlists
+  are collapsed by default with the longest few surfaced; a heuristic flags
+  likely decoys (very high item-count relative to unique clips) as de-emphasized,
+  never hidden - the user makes the call.
+- **First-run guidance.** After a scan the app suggests the longest playlist as
+  the starting edition rather than presenting an empty workbench against 170
+  choices. Nothing is auto-imported; it is a highlighted suggestion.
+
+None of this changes the contract: the app still authors from clip ids the scan
+reported. Scale handling is presentation only.
+
 ### Thumbnails
 
 The main process extracts three stills per clip (first, middle, last frame) with
@@ -262,12 +317,17 @@ than swallowing it.
 Two phases, because the first is independently useful and independently
 testable without any GUI:
 
-1. **CLI contract.** Per-clip mark re-keying, STN table parsing, seedable UIDs,
-   track flags in build.sh, `--scan-json` with `--fast`, `--cache`, and stderr
-   progress, `--project`, sample generator audio, and the pytest suite. At the end of this phase the CLI alone can build an
-   arbitrary authored edition from a hand-written `.mkvedproj`.
-2. **Electron app.** Scaffold, IPC, scan and thumbnail plumbing, workbench UI,
-   track panel, build runner, renderer tests, smoke test.
+1. **CLI contract. DONE (merged 27fe146, 2026-07-23).** Per-clip mark re-keying
+   (positional, not clip-keyed - a repeated clip keeps its own marks), STN table
+   parsing, seedable UIDs, track flags in build.sh, `--scan-json` with `--fast`,
+   `--cache`, and stderr progress, `--project`, sample generator audio (AC-3, not
+   AAC - ffmpeg writes AAC in .m2ts as stream_type 0x06 which mkvmerge drops), and
+   the pytest suite (81 tests). `.mkvedproj` strings are validated at
+   `load_project` as a security boundary (they reach the generated build.sh).
+   Validated against the synthetic sample and a real retail disc.
+2. **Electron app.** Scaffold, IPC, scan and thumbnail plumbing, workbench UI
+   (including the disc-scale handling above), track panel, build runner, renderer
+   tests, smoke test. This is what remains.
 
 ## Testing
 
@@ -300,7 +360,17 @@ same output headlessly. Verify track selection with `mkvmerge -J` (expected
 tracks, correct languages, correct default flags) and confirm the append-mismatch
 case is blocked rather than built.
 
-A real retail disc is the second validation target, once one is available. The
-synthetic sample stays the automated baseline because it is fast and committable;
-a real disc exercises what the generator cannot fake: genuine STN table contents,
-real language codes, PGS subtitles, VC-1 video, and true multi-angle playlists.
+A real retail disc is the second validation target. The synthetic sample stays
+the automated baseline because it is fast and committable; a real disc exercises
+what the generator cannot fake: genuine STN table contents, real language codes,
+PGS subtitles, and true multi-angle playlists.
+
+**Real-disc validation done (2026-07-23), Blade Runner 2049 3D:** whole-disc
+`--scan-json --fast --cache` completed in 14 s (165 clips, 0 warnings, 0 crashes);
+169 decoy-laden playlists parsed clean; all 3 multi-angle playlists auto-expanded;
+the 27.6 GB MVC feature probed with the PID join intact; orphan and corrupt clips
+did not break the scan. A `--project` build produced a real MKV carrying 2 AC-3 +
+2 PGS with correct eng/spa languages, and track selection (keep eng audio only)
+emitted `--audio-tracks / --no-subtitles / --language 1:eng` and produced exactly
+video + one eng audio track. The Electron app is built against this validated
+engine; the disc is the manual integration-test fixture for Phase 2.
