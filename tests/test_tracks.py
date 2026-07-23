@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import subprocess
 import sys
@@ -34,11 +35,56 @@ def test_clip_track_opts_unit(ge, sample_bd):
     _i, _m, streams = ge.parse_mpls(
         str(sample_bd / "PLAYLIST" / "00001.mpls"))
     p = ge.probe_clip(str(sample_bd / "STREAM" / "00001.m2ts"), fast=True)
-    opts = ge.clip_track_opts(streams[0], ENG_ONLY, p["tracks"])
+    opts, unresolved = ge.clip_track_opts(streams[0], ENG_ONLY, p["tracks"])
     joined = " ".join(opts)
     assert "--audio-tracks" in joined and "--no-subtitles" in joined
     assert "--language" in joined and ":eng" in joined
     assert "--default-track-flag" in joined
+    assert unresolved == []
+
+
+def test_clip_track_opts_reports_unresolvable_slot(ge, sample_bd):
+    """STN promises a jpn track; the actual file has only one audio track, so
+    neither the PID join nor the order fallback can resolve it."""
+    _i, _m, rich = ge.parse_mpls(str(sample_bd / "PLAYLIST" / "00001.mpls"))
+    p = ge.probe_clip(str(sample_bd / "STREAM" / "00031.m2ts"), fast=True)
+    opts, unresolved = ge.clip_track_opts(rich[0], WANT_JPN, p["tracks"])
+    assert unresolved == ["audio:jpn:ac3:1"]
+
+
+def mismatch_bdmv(ms, sample_bd, tmp_path):
+    """BDMV whose PLAYLIST claims 00031 has 2 audio streams (it has 1). The
+    STN layout guard passes; the probe/STN disagreement only shows up in
+    clip_track_opts."""
+    bdmv = tmp_path / "BDMV"
+    (bdmv).mkdir(parents=True)
+    os.symlink(str(sample_bd / "STREAM"), str(bdmv / "STREAM"))
+    pl = bdmv / "PLAYLIST"
+    pl.mkdir()
+    ms.write_mpls(str(pl / "00001.mpls"), ["00001", "00031"],
+                  {"00001": 4, "00031": 4},
+                  {"00001": ("eng", "jpn"), "00031": ("eng", "jpn")})
+    return bdmv
+
+
+@pytest.mark.parametrize("mode", ["flat", "xin1"])
+def test_unresolvable_slot_is_fatal_in_append_modes(ge, ms, sample_bd,
+                                                    tmp_path, mode):
+    bdmv = mismatch_bdmv(ms, sample_bd, tmp_path)
+    pf = proj(bdmv, tmp_path, mode, ["00001", "00031"], WANT_JPN)
+    r = run_cli(["--project", pf, str(tmp_path / "o")])
+    assert r.returncode != 0, r.stdout
+    both = r.stdout + r.stderr
+    assert "00031" in both and "audio:jpn:ac3:1" in both
+    assert "Traceback" not in r.stderr
+
+
+def test_unresolvable_slot_only_warns_in_linked(ge, ms, sample_bd, tmp_path):
+    bdmv = mismatch_bdmv(ms, sample_bd, tmp_path)
+    pf = proj(bdmv, tmp_path, "linked", ["00001", "00031"], WANT_JPN)
+    r = run_cli(["--project", pf, str(tmp_path / "o")])
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "00031" in r.stdout
 
 
 def test_selection_lands_in_output(sample_bd, tmp_path):

@@ -42,6 +42,7 @@ Requires mkvmerge (+ ffprobe) on PATH. MPLS PlayItem/PlayListMark tables are
 parsed directly (no libbluray/mpls_dump needed); MPLS timestamps are 45 kHz.
 """
 
+import hashlib
 import json
 import os
 import random
@@ -166,6 +167,21 @@ def parse_stn(it, off):
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+def comment_safe(s):
+    """Strip anything that could end a generated build.sh comment and start a
+    new (executable) line. load_project already rejects such names; this keeps
+    a future non-project caller from reintroducing the hole."""
+    return "".join(" " if ord(c) < 0x20 or ord(c) == 0x7F else c for c in str(s))
+
+
+def emit_progress(clip, done, total):
+    """One progress line on stderr, shared by scan and build so both speak the
+    same JSON-lines contract."""
+    print(json.dumps({"type": "progress", "clip": clip,
+                      "done": done, "total": total}),
+          file=sys.stderr, flush=True)
+
+
 def uid_for(clip_id):
     return "%032x" % int(clip_id)
 
@@ -215,13 +231,22 @@ def clip_duration_ns(frames, num, den, path):
     return ffprobe_duration_ns(path)
 
 
+def cache_key(path, st=None):
+    """Cache filename for one clip: basename (for humans) + a hash of the
+    ABSOLUTE path + size + mtime. The path hash is what keeps two discs that
+    share a cache dir - both have a 00001.m2ts - from colliding."""
+    st = st or os.stat(path)
+    h = hashlib.sha1(os.path.abspath(path).encode()).hexdigest()[:12]
+    return f"{os.path.basename(path)}.{h}.{st.st_size}.{int(st.st_mtime)}.json"
+
+
 def probe_clip(path, fast=False, cache_dir=None):
     """ffprobe + mkvmerge -J for one clip, optionally through a cache keyed by
-    name/size/mtime. fast skips frame counting (frames=None); a cached full
+    abspath/size/mtime. fast skips frame counting (frames=None); a cached full
     result satisfies a fast request; a fast entry is upgraded in place when a
     full probe is asked for. A changed clip gets a new key (old entry orphaned)."""
     st = os.stat(path)
-    key = f"{os.path.basename(path)}.{st.st_size}.{int(st.st_mtime)}.json"
+    key = cache_key(path, st)
     cf = os.path.join(cache_dir, key) if cache_dir else None
     if cf and os.path.exists(cf):
         try:
@@ -280,10 +305,19 @@ def clip_marks_from(items, marks):
 
 def sweep_playlists(bdmv):
     """Parse every playlist in BDMV/PLAYLIST once. Returns (playlists,
-    clip_marks, clip_streams, warnings); marks and streams are unioned per
-    clip across playlists. A malformed .mpls becomes a warning, not a fatal
-    error (real discs carry menu/junk playlists)."""
+    clip_marks, clip_streams, warnings). Marks are unioned per clip across
+    playlists. Streams are NOT unioned: each clip keeps the RICHEST STN list
+    seen (most entries; first seen wins a tie), because 00000.mpls is usually
+    the FirstPlay/menu playlist and often carries a restricted stream list for
+    a clip the feature plays in full - letting it win would feed
+    check_track_layout a wrong layout and make a good disc unbuildable.
+    A malformed .mpls becomes a warning, not a fatal error (real discs carry
+    menu/junk playlists)."""
     pl_dir = os.path.join(bdmv, "PLAYLIST")
+    if not os.path.isdir(pl_dir):
+        sys.exit(f"{pl_dir}: no such directory - expected a BDMV folder "
+                 "containing PLAYLIST/ and STREAM/ (pass .../BDMV, not the "
+                 "disc root)")
     playlists, cmarks, cstreams, warns = [], {}, {}, []
     for fn in sorted(os.listdir(pl_dir)):
         if not fn.lower().endswith(".mpls"):
@@ -299,7 +333,8 @@ def sweep_playlists(bdmv):
             cmarks.setdefault(c, set()).update(offs)
         for (clips, _i, _o), st in zip(items, streams):
             for c in clips:                  # angle clips share the item's STN
-                cstreams.setdefault(c, st)
+                if c not in cstreams or len(st) > len(cstreams[c]):
+                    cstreams[c] = st
         n_ang = max((len(cl) for cl, _i, _o in items), default=1)
         stem = fn[:-5]
         playlists.append({"file": fn, "angles": n_ang, "editions": [
@@ -348,16 +383,22 @@ def compute_slots(clip_streams):
 
 
 def clip_track_opts(streams, tracks_sel, tracks):
-    """mkvmerge options placed before ONE input file, realizing the project's
-    slot selection on this clip. TIDs come from matching the STN PID against
-    mkvmerge -J properties.number; if a PID is missing, fall back to pairing
-    the k-th STN stream of a kind with mkvmerge's k-th track of that type.
-    Video is always kept."""
+    """Returns (opts, unresolved): mkvmerge options placed before ONE input
+    file, realizing the project's slot selection on this clip, plus the slot
+    ids that could not be resolved to a track id at all. TIDs come from
+    matching the STN PID against mkvmerge -J properties.number; if a PID is
+    missing, fall back to pairing the k-th STN stream of a kind with
+    mkvmerge's k-th track of that type. Video is always kept.
+
+    An unresolved slot means the STN and the probe disagree; dropping it
+    silently produces exactly the mis-paired append check_track_layout exists
+    to prevent, so the caller decides (fatal when appending). Returning it
+    rather than exiting here keeps this function mode-agnostic."""
     keep = {t["slot"]: t for t in tracks_sel if t.get("keep")}
     by_pid = {t["pid"]: t["tid"] for t in tracks if t.get("pid") is not None}
     typed = {"audio": [t["tid"] for t in tracks if t["type"] == "audio"],
              "subtitle": [t["tid"] for t in tracks if t["type"] == "subtitles"]}
-    seen, aud, sub, extra = {}, [], [], []
+    seen, aud, sub, extra, unresolved = {}, [], [], [], []
     for sid, s in slot_ids_for_clip(streams):
         if sid is None:
             continue
@@ -371,6 +412,7 @@ def clip_track_opts(streams, tracks_sel, tracks):
             lst = typed.get(s["kind"], [])
             tid = lst[k] if k < len(lst) else None
         if tid is None:
+            unresolved.append(sid)
             continue
         (aud if s["kind"] == "audio" else sub).append(tid)
         lang = sel.get("lang") or s["lang"]
@@ -383,7 +425,7 @@ def clip_track_opts(streams, tracks_sel, tracks):
             if aud else "--no-audio",
             "--subtitle-tracks " + ",".join(map(str, sorted(sub)))
             if sub else "--no-subtitles"]
-    return opts + extra
+    return opts + extra, unresolved
 
 
 def check_track_layout(editions, tracks_sel, clip_streams, mode):
@@ -549,6 +591,26 @@ def parse_args(argv):
                 False, fast, cache, seed, None)
 
 
+def check_name(path, field, val):
+    """A project is shareable, attacker-influenceable input, and title/edition
+    names are interpolated into a generated SHELL SCRIPT (comment lines) and
+    into output filenames. Control characters would let a name close the
+    comment and start a command; separators and ".." would write outside
+    out_dir. Reject both at the boundary."""
+    if not isinstance(val, str) or not val:
+        sys.exit(f"{path}: {field} must be a non-empty string")
+    bad = next((c for c in val if ord(c) < 0x20 or ord(c) == 0x7F), None)
+    if bad is not None:
+        sys.exit(f"{path}: {field} contains a control character "
+                 f"(0x{ord(bad):02x}) - it would inject lines into build.sh")
+    if "/" in val or "\\" in val:
+        sys.exit(f"{path}: {field} contains a path separator - "
+                 "it would write outside the output directory")
+    if any(part == ".." for part in val.replace("\\", "/").split("/")):
+        sys.exit(f"{path}: {field} contains a '..' path component - "
+                 "it would write outside the output directory")
+
+
 def load_project(path):
     """Validate and return a .mkvedproj (version 1). The project file is the
     GUI/CLI contract: everything the app can author must round-trip here."""
@@ -560,9 +622,20 @@ def load_project(path):
             sys.exit(f"{path}: missing {k!r}")
     if p["mode"] not in ("flat", "linked", "xin1"):
         sys.exit(f"{path}: bad mode {p['mode']!r}")
-    for ed in p["editions"]:
-        if not ed.get("name") or not ed.get("clips"):
+    check_name(path, "title", p["title"])
+    if not isinstance(p["editions"], list) or not p["editions"]:
+        sys.exit(f"{path}: editions must be a non-empty list")
+    for i, ed in enumerate(p["editions"]):
+        if not isinstance(ed, dict) or not ed.get("name") or not ed.get("clips"):
             sys.exit(f"{path}: every edition needs a name and clips")
+        check_name(path, f"editions[{i}].name", ed["name"])
+    if "tracks" in p:
+        if not isinstance(p["tracks"], list):
+            sys.exit(f"{path}: tracks must be a list")
+        for i, t in enumerate(p["tracks"]):
+            if not isinstance(t, dict) or not isinstance(t.get("slot"), str):
+                sys.exit(f"{path}: tracks[{i}] must be an object with a "
+                         "string 'slot'")
     return p
 
 
@@ -727,7 +800,7 @@ def build_flat(stream, out_dir, title, editions, clipinfo, preserve, qpfile,
         else:
             chap = "--generate-chapters when-appending"
 
-        lines.append(f"# {name}: {len(items)} segments")
+        lines.append(f"# {comment_safe(name)}: {len(items)} segments")
         lines.append(f"mkvmerge -o {shlex.quote(outfn)} {chap} {appended}")
         lines.append("")
 
@@ -735,9 +808,11 @@ def build_flat(stream, out_dir, title, editions, clipinfo, preserve, qpfile,
             qfn = f"{title}.{name}.qpfile.txt"
             if write_qpfile(os.path.join(out_dir, qfn),
                             [c for c, _i, _o in items], clipinfo):
-                lines.append(f"# re-encode seam list -> {qfn} (x264/x265 --qpfile)")
+                lines.append(f"# re-encode seam list -> {comment_safe(qfn)}"
+                             " (x264/x265 --qpfile)")
             else:
-                lines.append(f"# {qfn} skipped: frame counts unavailable")
+                lines.append(f"# {comment_safe(qfn)} skipped: "
+                             "frame counts unavailable")
             lines.append("")
     return "\n".join(lines) + "\n", outputs
 
@@ -765,7 +840,8 @@ def build_linked(stream, out_dir, title, editions, clipinfo, preserve,
               f"{shlex.quote('seg' + first + '.mkv')}")
 
     lines = ["#!/usr/bin/env bash", "set -euo pipefail", "",
-             f"# linked mode: mpv-ONLY. Keep every seg*.mkv beside {title}.mkv.",
+             "# linked mode: mpv-ONLY. Keep every seg*.mkv beside "
+             f"{comment_safe(title)}.mkv.",
              "# Do NOT let a media server scan this folder (it can't assemble editions).", "",
              "# 1. remux each unique on-disc segment (fixed SegmentUID, no stray chapters)"]
     lines += remux
@@ -803,9 +879,11 @@ def build_xin1(stream, out_dir, title, editions, clipinfo, preserve, qpfile,
     if qpfile:
         qfn = f"{title}.qpfile.txt"
         if write_qpfile(os.path.join(out_dir, qfn), order, clipinfo):
-            lines.append(f"# re-encode seam list -> {qfn} (x264/x265 --qpfile)")
+            lines.append(f"# re-encode seam list -> {comment_safe(qfn)}"
+                         " (x264/x265 --qpfile)")
         else:
-            lines.append(f"# {qfn} skipped: frame counts unavailable")
+            lines.append(f"# {comment_safe(qfn)} skipped: "
+                         "frame counts unavailable")
         lines.append("")
     return "\n".join(lines) + "\n", outfn
 
@@ -828,9 +906,7 @@ def run_scan(args):
                           "message": f"missing clip: {path}"})
             continue
         p = probe_clip(path, fast=args.fast, cache_dir=args.cache)
-        print(json.dumps({"type": "progress", "clip": c,
-                          "done": done, "total": len(order)}),
-              file=sys.stderr, flush=True)
+        emit_progress(c, done, len(order))
         clips[c] = {"path": os.path.abspath(path), "frames": p["frames"],
                     "fps": p["fps"], "dur_ns": p["dur_ns"],
                     "codec": p["codec"], "exact": p["frames"] is not None,
@@ -873,8 +949,9 @@ def main():
             for c in ed["clips"]:
                 if c not in clip_order:
                     clip_order.append(c)
-        clipinfo, probes = gather_clips(stream, clip_order,
-                                        cache_dir=args.cache)
+        clipinfo, probes = gather_clips(stream, clip_order, fast=args.fast,
+                                        cache_dir=args.cache,
+                                        progress=emit_progress)
         editions = []
         for ed in p["editions"]:
             items = [(c, 0, int(round(clipinfo[c].dur * TICKS / NS)))
@@ -891,16 +968,25 @@ def main():
         editions = load_editions(bdmv, args.eds)
         stream = os.path.abspath(os.path.join(bdmv, "STREAM"))
         clipinfo, probes = gather_clips(stream, unique_clips(editions),
-                                        cache_dir=args.cache)
+                                        fast=args.fast, cache_dir=args.cache,
+                                        progress=emit_progress)
     os.makedirs(out_dir, exist_ok=True)
 
     warnings = vc1_warnings(clipinfo, mode)
     clip_opts = None
     if tracks_sel:
         warnings += check_track_layout(editions, tracks_sel, cstreams, mode)
-        clip_opts = {c: clip_track_opts(cstreams.get(c, []), tracks_sel,
-                                        probes[c]["tracks"])
-                     for c in probes}
+        clip_opts, unresolved = {}, []
+        for c in probes:
+            clip_opts[c], miss = clip_track_opts(
+                cstreams.get(c, []), tracks_sel, probes[c]["tracks"])
+            unresolved += [f"clip {c}: selected slot {sid} matched no track in "
+                           "the file (STN/probe disagreement) - appending "
+                           "would mis-pair tracks" for sid in miss]
+        if unresolved:
+            if mode in ("flat", "xin1"):
+                sys.exit("ERROR: " + "\nERROR: ".join(unresolved))
+            warnings += unresolved
     if mode == "flat":
         script, outputs = build_flat(stream, out_dir, title, editions, clipinfo,
                                      preserve, qpfile, clip_opts=clip_opts)
@@ -925,8 +1011,13 @@ def main():
         for n, i, m in editions))
     print(f"wrote {out_dir}/build.sh -> produces:\n{summary}")
     if qpfile and mode in ("flat", "xin1"):
-        print("  qpfile(s) written - consume only if you RE-ENCODE a cut:")
-        print("    x264 --qpfile <file>.qpfile.txt ...   |   x265 --qpfile <file>.qpfile.txt ...")
+        # --fast leaves frames=None, so write_qpfile degrades to a comment
+        if any(ci.frames is None for ci in clipinfo.values()):
+            print("  qpfile(s) SKIPPED: frame counts unavailable "
+                  "(--fast) - re-run without --fast to emit them")
+        else:
+            print("  qpfile(s) written - consume only if you RE-ENCODE a cut:")
+            print("    x264 --qpfile <file>.qpfile.txt ...   |   x265 --qpfile <file>.qpfile.txt ...")
     for w in warnings:
         print("  ! " + w)
 

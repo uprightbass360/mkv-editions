@@ -303,14 +303,31 @@ that would otherwise take minutes on a real disc (ffprobe falls back to
 seconds with container durations instead. Run `--fast` first for a usable UI,
 then a full scan in the background to upgrade frame-exact features
 (`--qpfile`, exact chapter boundaries) once it lands. `--cache DIR` stores
-per-clip probe results keyed by path, size, and mtime, and reuses them across
-runs; a changed or replaced clip invalidates only its own entry.
+per-clip probe results keyed by **absolute path, size, and mtime** (the entry
+is named `<basename>.<path-hash>.<size>.<mtime>.json`, so two discs that share
+one cache dir - both have a `00001.m2ts` - cannot collide), and reuses them
+across runs; a changed or replaced clip invalidates only its own entry.
+
+`--fast` and the progress lines apply to the **build** path too, not just
+`--scan-json`: building without `--fast` re-probes every clip with
+`ffprobe -count_frames`, which on a retail disc is tens of minutes. Use
+`--fast` when you do not need `--qpfile` or frame-exact chapter boundaries.
+With `--fast --qpfile` the frame counts are unknown, so no qpfile is written -
+`build.sh` carries a `# ... skipped: frame counts unavailable` comment instead
+and the run says so on stdout.
 
 A slot id is `kind:lang:codec:ordinal` (video streams don't get a slot).
 `ordinal` disambiguates streams that share kind/lang/codec - e.g. a disc with
 two English AC-3 tracks (main mix, commentary) needs it to keep them apart.
 Each slot lists `present_in` / `missing_from` clip ids, computed by unioning
 every clip's STN streams project-wide.
+
+When several playlists describe the same clip, that clip keeps the **richest**
+STN list (most stream entries; first seen wins a tie) rather than the one from
+the lowest-numbered playlist. `00000.mpls` is usually the FirstPlay/menu
+playlist and often advertises a cut-down stream list for a clip the feature
+plays in full; letting it win would make `check_track_layout` reject a
+perfectly good disc.
 
 **`--project FILE.mkvedproj`** - read title, mode, flags, editions, and track
 selection from a JSON file instead of `"Name=playlist.mpls"` argv, then
@@ -338,6 +355,15 @@ notice) - the project file is authoritative. Version-1 schema:
   ]
 }
 ```
+
+A project file is shareable and its strings are interpolated into the generated
+`build.sh` and into output filenames, so it is validated at load. `title` and
+every `editions[].name` must be a non-empty string with **no control characters**
+(a newline would close a `build.sh` comment and start a command) and **no `/`,
+`\`, or `..` path component** (which would write outside the output directory).
+`editions` must be a non-empty list, and every `tracks` entry must be an object
+with a string `slot`. Any violation is a clean error naming the offending field,
+not a traceback.
 
 `editions[].clips` is a project-wide clip list (any order, any repeats, mixed
 across playlists) - the same "any edition structure is supported" rule above

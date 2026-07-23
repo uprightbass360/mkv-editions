@@ -68,3 +68,47 @@ def test_parse_stn_offset_at_or_past_buffer_end(ge):
     it = b"\x00" * 10
     assert ge.parse_stn(it, 10) == []   # offset exactly at end
     assert ge.parse_stn(it, 20) == []   # offset past end
+
+
+# ---------------------------------------------------------------------------
+# sweep_playlists STN precedence: 00000.mpls is typically the FirstPlay/menu
+# playlist and often carries a restricted stream list for a clip the feature
+# playlist uses in full. The richest list must win, not the lowest-numbered.
+# ---------------------------------------------------------------------------
+def _two_playlist_bdmv(ms, tmp_path, poor_first):
+    """BDMV/PLAYLIST with two playlists naming clip 00001: one lists 1 audio,
+    the other 2. poor_first puts the restricted one in 00000.mpls."""
+    pl = tmp_path / "BDMV" / "PLAYLIST"
+    pl.mkdir(parents=True)
+    durs = {"00001": 4}
+    poor, rich = ("00000.mpls", "00001.mpls") if poor_first else \
+                 ("00001.mpls", "00000.mpls")
+    ms.write_mpls(str(pl / poor), ["00001"], durs, {"00001": ("eng",)})
+    ms.write_mpls(str(pl / rich), ["00001"], durs, {"00001": ("eng", "jpn")})
+    return str(tmp_path / "BDMV")
+
+
+def test_sweep_prefers_richest_stn(ge, ms, tmp_path):
+    bdmv = _two_playlist_bdmv(ms, tmp_path, poor_first=True)
+    _pls, _cm, cstreams, _w = ge.sweep_playlists(bdmv)
+    auds = [s for s in cstreams["00001"] if s["kind"] == "audio"]
+    assert [s["lang"] for s in auds] == ["eng", "jpn"]
+
+
+def test_sweep_richest_stn_wins_either_order(ge, ms, tmp_path):
+    bdmv = _two_playlist_bdmv(ms, tmp_path, poor_first=False)
+    _pls, _cm, cstreams, _w = ge.sweep_playlists(bdmv)
+    auds = [s for s in cstreams["00001"] if s["kind"] == "audio"]
+    assert [s["lang"] for s in auds] == ["eng", "jpn"]
+
+
+def test_sweep_tie_keeps_first_seen(ge, ms, tmp_path):
+    pl = tmp_path / "BDMV" / "PLAYLIST"
+    pl.mkdir(parents=True)
+    ms.write_mpls(str(pl / "00000.mpls"), ["00001"], {"00001": 4},
+                  {"00001": ("eng",)})
+    ms.write_mpls(str(pl / "00009.mpls"), ["00001"], {"00001": 4},
+                  {"00001": ("fra",)})
+    _pls, _cm, cstreams, _w = ge.sweep_playlists(str(tmp_path / "BDMV"))
+    auds = [s for s in cstreams["00001"] if s["kind"] == "audio"]
+    assert [s["lang"] for s in auds] == ["eng"]
