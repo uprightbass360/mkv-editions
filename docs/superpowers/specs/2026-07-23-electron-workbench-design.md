@@ -32,7 +32,7 @@ src/gen-editions.py      unchanged entry point, two additive flags
 app/
   main/                  main process: child processes, fs, dialogs, IPC
   preload/               contextBridge; contextIsolation on, nodeIntegration off
-  renderer/              workbench UI (TypeScript, Vite, Svelte)
+  renderer/              workbench UI (SvelteKit + adapter-static, Vite)
 samples/make-sample.py   gains audio tracks
 docs/superpowers/specs/
 ```
@@ -41,14 +41,29 @@ The renderer never touches the filesystem and never spawns a process. The main
 process shells out to `python3 src/gen-editions.py` and to `ffmpeg` for
 thumbnails, and streams results over IPC.
 
-The renderer is **Svelte + Vite** (not SvelteKit). The Electron renderer is a
-client-only SPA over `file://`; SvelteKit's server-side machinery (SSR, server
-endpoints, adapters) does not apply here, because the privileged side is the
-Electron main process reached over `contextBridge` IPC, not an HTTP server.
-Renderer UI is written as self-contained Svelte components that call
-`window.api.*` (the preload-exposed IPC surface). Keeping components free of
-Electron specifics leaves the door open to a future SvelteKit-hosted web version,
-which would be a separate product with a server-side CLI backend.
+The renderer is **SvelteKit with `adapter-static`**, aligned to the stack of the
+owner's existing SvelteKit app (ARM `services/ui-neu/frontend`): Svelte 5,
+Vite 8, `@sveltejs/vite-plugin-svelte` 7, TypeScript 6, vitest 4, Tailwind 4,
+`@testing-library/svelte` 5, Playwright for visual tests. Consistency with that
+project is the reason to use SvelteKit here rather than plain Svelte.
+
+Architecture, given that stack cannot use `electron-vite` (which peer-caps at
+Vite 7 while this stack is Vite 8):
+
+- The renderer is a SvelteKit app prerendered to a static SPA by `adapter-static`
+  (`ssr = false`, `prerender = true`, `paths.relative = true` so assets resolve
+  under `file://`). Electron's main process loads the built `index.html` via
+  `loadFile` in production and the Vite dev-server URL via `loadURL` in dev.
+- The Electron **main** and **preload** are built separately from SvelteKit (a
+  small esbuild/tsup or tsc step), since electron-vite is dropped. The preload
+  still exposes `window.api` via `contextBridge` (contextIsolation on,
+  nodeIntegration off, sandbox on); SvelteKit code calls `window.api.*` only and
+  never imports Electron, `fs`, or `child_process`.
+- SvelteKit's server-side features (SSR, server endpoints, form actions) stay
+  unused; the privileged side is the Electron main process over IPC, not an HTTP
+  server. The single route renders the workbench. Because the app is a static
+  SPA, the same renderer could later be served as a web frontend against a
+  backend that runs the CLI (the ARM service shape) with no rewrite of the UI.
 
 ## CLI contract
 
