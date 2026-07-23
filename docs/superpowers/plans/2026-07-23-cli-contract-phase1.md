@@ -464,9 +464,15 @@ instead of `(ed_name, ed_items, marks)`. Note `marks_by_item` is computed from
 the FULL item list once and shared by every angle's edition, since all angles
 have the same PlayItem positions.
 
-In `main`, the summary print `len(m)` becomes `sum(len(v) for v in m)`. The
-`preserve and marks` truthiness checks in `build_flat` and `editions_xml` work
-unchanged on a list (empty list is falsy, as an empty list of pairs was).
+In `main`, the summary print `len(m)` becomes `sum(len(v) for v in m)`.
+
+The `preserve and marks` truthiness checks in `build_flat` and `editions_xml`
+MUST become `preserve and any(marks)`. `marks_by_item` returns one entry per
+item, so the list is truthy even when every entry is an empty tuple - unlike
+the old flat list of pairs, which was falsy when the playlist had no marks.
+Left as-is, a mark-free playlist would take the has-marks path and emit
+different chapters (positions `[]` splits every clip rather than yielding one
+whole-clip atom per item).
 
 - [ ] **Step 4: Run the full suite + a real build**
 
