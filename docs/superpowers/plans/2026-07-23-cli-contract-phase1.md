@@ -1096,7 +1096,7 @@ git commit -m "--project: build authored editions from a .mkvedproj headlessly"
 
 **Interfaces:**
 - Consumes: `slot_ids_for_clip`, `probes[clip]["tracks"]`, `cstreams`, `tracks_sel`.
-- Produces: `clip_track_opts(streams, tracks_sel, tracks) -> [option strings]`; `check_track_layout(editions, tracks_sel, clip_streams, mode) -> [warning strings]` (calls `sys.exit` for flat/xin1 mismatches); all three `build_*` gain a final `clip_opts=None` parameter (dict clip -> list of option strings emitted before that input file).
+- Produces: `clip_track_opts(streams, tracks_sel, tracks) -> [option strings]`; `check_track_layout(editions, tracks_sel, clip_streams, mode) -> [warning strings]` (calls `sys.exit` for flat/xin1 mismatches); `input_spec(stream, clip, clip_opts) -> str`; all three `build_*` gain a final `clip_opts=None` parameter (dict clip -> list of option strings emitted before that input file).
 
 - [ ] **Step 1: Write the failing test** (`tests/test_tracks.py`)
 
@@ -1257,29 +1257,33 @@ the mode dispatch:
 
 (move the existing `warnings = vc1_warnings(clipinfo, mode)` line above this).
 
-`build_flat` - signature gains `clip_opts=None`; replace the two source lines:
+Add ONE shared helper next to `unique_clips` (the spec's Refactor scope requires
+a shared helper here, so all three modes stay consistent - do NOT inline this
+logic three times):
 
 ```python
-        srcs = []
-        for c, _i, _o in items:
-            q = shlex.quote(os.path.join(stream, f"{c}.m2ts"))
-            o = " ".join(clip_opts.get(c, [])) if clip_opts else ""
-            srcs.append(f"{o} {q}".strip())
-        appended = " + ".join(srcs)
+def input_spec(stream, clip, clip_opts):
+    """One mkvmerge input: its per-clip track options (if any) followed by the
+    quoted path. Shared by all three modes so option emission lives in one
+    place."""
+    q = shlex.quote(os.path.join(stream, f"{clip}.m2ts"))
+    o = " ".join(clip_opts.get(clip, [])) if clip_opts else ""
+    return f"{o} {q}".strip()
 ```
 
-`build_xin1` - same treatment for its `appended = " + ".join(...)` over `order`.
-
-`build_linked` - signature gains `clip_opts=None`; the remux list becomes:
+Each `build_*` gains a final `clip_opts=None` parameter and calls it:
 
 ```python
-    def src(c):
-        q = shlex.quote(os.path.join(stream, f"{c}.m2ts"))
-        o = " ".join(clip_opts.get(c, [])) if clip_opts else ""
-        return f"{o} {q}".strip()
+# build_flat, replacing its srcs/appended lines:
+        appended = " + ".join(input_spec(stream, c, clip_opts)
+                              for c, _i, _o in items)
 
+# build_xin1, replacing its appended line:
+    appended = " + ".join(input_spec(stream, c, clip_opts) for c in order)
+
+# build_linked, replacing its remux list:
     remux = [f"mkvmerge -o seg{c}.mkv --no-chapters --segment-uid 0x{uid_for(c)} "
-             f"{src(c)}" for c in order]
+             f"{input_spec(stream, c, clip_opts)}" for c in order]
 ```
 
 Update the three `build_*` call sites in `main` to pass `clip_opts=clip_opts`.
