@@ -32,7 +32,7 @@ src/gen-editions.py      unchanged entry point, two additive flags
 app/
   main/                  main process: child processes, fs, dialogs, IPC
   preload/               contextBridge; contextIsolation on, nodeIntegration off
-  renderer/              workbench UI (TypeScript, Vite, React)
+  renderer/              workbench UI (TypeScript, Vite, Svelte)
 samples/make-sample.py   gains audio tracks
 docs/superpowers/specs/
 ```
@@ -40,6 +40,15 @@ docs/superpowers/specs/
 The renderer never touches the filesystem and never spawns a process. The main
 process shells out to `python3 src/gen-editions.py` and to `ffmpeg` for
 thumbnails, and streams results over IPC.
+
+The renderer is **Svelte + Vite** (not SvelteKit). The Electron renderer is a
+client-only SPA over `file://`; SvelteKit's server-side machinery (SSR, server
+endpoints, adapters) does not apply here, because the privileged side is the
+Electron main process reached over `contextBridge` IPC, not an HTTP server.
+Renderer UI is written as self-contained Svelte components that call
+`window.api.*` (the preload-exposed IPC surface). Keeping components free of
+Electron specifics leaves the door open to a future SvelteKit-hosted web version,
+which would be a separate product with a server-side CLI backend.
 
 ## CLI contract
 
