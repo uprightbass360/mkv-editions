@@ -42,6 +42,7 @@ Requires mkvmerge (+ ffprobe) on PATH. MPLS PlayItem/PlayListMark tables are
 parsed directly (no libbluray/mpls_dump needed); MPLS timestamps are 45 kHz.
 """
 
+import json
 import os
 import random
 import sys
@@ -187,7 +188,7 @@ def ffprobe_duration_ns(path):
     return int(round(float(out) * NS))
 
 
-def frame_info(path):
+def frame_info(path, count=True):
     """(codec, frames|None, fps_num, fps_den). Container metadata; counts only if needed."""
     def probe(extra):
         return subprocess.check_output(
@@ -198,7 +199,7 @@ def frame_info(path):
     rfr = (d.get("r_frame_rate", "0/1").split("/") + ["1"])[:2]
     num, den = int(rfr[0]), int(rfr[1] or 1)
     nbf = d.get("nb_frames", "N/A")
-    if not nbf.isdigit():  # m2ts often lacks nb_frames -> count (slow but exact)
+    if not nbf.isdigit() and count:  # m2ts often lacks nb_frames -> count (slow but exact)
         d2 = dict(l.split("=", 1) for l in probe(
             ["-count_frames", "-show_entries", "stream=nb_read_frames", "-of", "default=nw=1"]
         ).splitlines() if "=" in l)
@@ -211,6 +212,32 @@ def clip_duration_ns(frames, num, den, path):
     if frames and num:
         return int(round(frames * den * NS / num))
     return ffprobe_duration_ns(path)
+
+
+def probe_clip(path, fast=False, cache_dir=None):
+    """ffprobe + mkvmerge -J for one clip, optionally through a cache keyed by
+    name/size/mtime. fast skips frame counting (frames=None); a cached full
+    result satisfies a fast request; a fast entry is upgraded in place when a
+    full probe is asked for. A changed clip gets a new key (old entry orphaned)."""
+    st = os.stat(path)
+    key = f"{os.path.basename(path)}.{st.st_size}.{int(st.st_mtime)}.json"
+    cf = os.path.join(cache_dir, key) if cache_dir else None
+    if cf and os.path.exists(cf):
+        got = json.load(open(cf))
+        if fast or got["frames"] is not None:
+            return got
+    codec, frames, num, den = frame_info(path, count=not fast)
+    tracks = [{"tid": t["id"], "type": t["type"],
+               "pid": t.get("properties", {}).get("number")}
+              for t in json.loads(subprocess.check_output(
+                  ["mkvmerge", "-J", path]))["tracks"]]
+    got = {"codec": codec, "frames": frames, "fps": [num, den],
+           "dur_ns": clip_duration_ns(frames, num, den, path),
+           "tracks": tracks}
+    if cf:
+        os.makedirs(cache_dir, exist_ok=True)
+        json.dump(got, open(cf, "w"))
+    return got
 
 
 def marks_by_item(items, marks):
@@ -399,19 +426,20 @@ def load_editions(bdmv, eds):
     return out
 
 
-def gather_clips(stream, editions):
-    info = {}
-    for name, items, _m in editions:
-        for clip, _i, _o in items:
-            if clip in info:
-                continue
-            path = os.path.join(stream, f"{clip}.m2ts")
-            if not os.path.exists(path):
-                sys.exit(f"missing clip: {path} (referenced by edition \"{name}\")")
-            codec, fr, num, den = frame_info(path)
-            info[clip] = ClipInfo(fr, num, den,
-                                  clip_duration_ns(fr, num, den, path), codec)
-    return info
+def gather_clips(stream, clips, fast=False, cache_dir=None, progress=None):
+    """Probe the given clip ids. Returns (clipinfo, probes)."""
+    info, probes = {}, {}
+    for n, clip in enumerate(clips, 1):
+        path = os.path.join(stream, f"{clip}.m2ts")
+        if not os.path.exists(path):
+            sys.exit(f"missing clip: {path}")
+        p = probe_clip(path, fast=fast, cache_dir=cache_dir)
+        probes[clip] = p
+        info[clip] = ClipInfo(p["frames"], p["fps"][0], p["fps"][1],
+                              p["dur_ns"], p["codec"])
+        if progress:
+            progress(clip, n, len(clips))
+    return info, probes
 
 
 # ---------------------------------------------------------------------------
@@ -622,7 +650,8 @@ def main():
     editions = load_editions(bdmv, eds)
     stream = os.path.abspath(os.path.join(bdmv, "STREAM"))
     os.makedirs(out_dir, exist_ok=True)
-    clipinfo = gather_clips(stream, editions)
+    clipinfo, probes = gather_clips(stream, unique_clips(editions),
+                                    cache_dir=args.cache)
 
     warnings = vc1_warnings(clipinfo, mode)
     if mode == "flat":
