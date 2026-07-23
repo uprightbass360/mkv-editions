@@ -205,10 +205,22 @@ def clip_duration_ns(frames, num, den, path):
     return ffprobe_duration_ns(path)
 
 
+def marks_by_item(items, marks):
+    """Mark offsets within each PlayItem, positionally parallel to items, so a
+    playlist's marks stay bound to the occurrence that carried them (a clip may
+    appear more than once in one edition)."""
+    per = [set() for _ in items]
+    for pi, ts in marks:
+        _clips, in_t, _o = items[pi]
+        per[pi].add(int(round((ts - in_t) * NS / TICKS)))
+    return [tuple(sorted(s)) for s in per]
+
+
 def clip_marks_from(items, marks):
-    """Re-key playlist marks from PlayItem index to per-clip ns offsets, so a
-    mark travels with its clip when an authored edition re-sequences it. A
-    mark on a multi-angle item attaches to every angle's clip."""
+    """The same marks re-keyed by clip id, for the scan model: an authored
+    edition has no PlayItem indices, so its marks attach to clips and every
+    occurrence gets them. A mark on a multi-angle item attaches to every
+    angle's clip."""
     out = {}
     for pi, ts in marks:
         clips, in_t, _o = items[pi]
@@ -218,12 +230,13 @@ def clip_marks_from(items, marks):
     return {c: tuple(sorted(v)) for c, v in out.items()}
 
 
-def edition_mark_positions(items, clip_marks, clipinfo):
-    """Chapter-mark timestamps mapped onto this edition's virtual timeline:
-    each occurrence of a clip contributes that clip's marks at its offset."""
+def edition_mark_positions(items, item_marks, clipinfo):
+    """Chapter-mark timestamps mapped onto this edition's virtual timeline.
+    item_marks is parallel to items, so each occurrence contributes only its
+    own marks."""
     out, off = set(), 0
-    for clip, _i, _o in items:
-        for m in clip_marks.get(clip, ()):
+    for (clip, _i, _o), local in zip(items, item_marks):
+        for m in local:
             p = off + m
             if p > 0 and m < clipinfo[clip].dur:
                 out.add(p)
@@ -339,12 +352,12 @@ def load_editions(bdmv, eds):
             print(f"  ! {name}: {len(marks) - len(valid)} chapter mark(s) reference "
                   "missing PlayItems - dropped")
         marks = valid
-        cm = clip_marks_from(items, marks)
+        im = marks_by_item(items, marks)
         for a in range(n_ang):
             ed_name = name if a == 0 else f"{name} (Angle {a + 1})"
             ed_items = [(clips[a] if a < len(clips) else clips[0], i, o)
                         for clips, i, o in items]
-            out.append((ed_name, ed_items, cm))
+            out.append((ed_name, ed_items, im))
     return out
 
 
@@ -443,7 +456,7 @@ def editions_xml(editions, clipinfo, preserve, atom_fn):
                 f"      <EditionString>{xml_escape(name)}</EditionString>",
                 "    </EditionDisplay>"]
         positions = (edition_mark_positions(items, marks, clipinfo)
-                     if preserve and marks else None)
+                     if preserve and any(marks) else None)
         for spec in edition_atom_specs(name, items, clipinfo, positions):
             xml += atom_fn(*spec)
         xml.append("  </EditionEntry>")
@@ -470,7 +483,7 @@ def build_flat(stream, out_dir, title, editions, clipinfo, preserve, qpfile):
         outfn = f"{title} {{edition-{name}}}.mkv"
         outputs.append(outfn)
 
-        if preserve and marks:
+        if preserve and any(marks):
             positions = edition_mark_positions(items, marks, clipinfo)
             chapfn = f"{title}.{name}.chapters.xml"
             open(os.path.join(out_dir, chapfn), "w").write(simple_chapters_xml(positions))
@@ -587,7 +600,7 @@ def main():
 
     print(f"mode: {mode}  preserve-chapters: {preserve}  qpfile: {qpfile}")
     print("editions: " + ", ".join(
-        f"{n} ({len(i)} segs, {sum(len(v) for v in m.values())} marks)"
+        f"{n} ({len(i)} segs, {sum(len(v) for v in m)} marks)"
         for n, i, m in editions))
     print(f"wrote {out_dir}/build.sh -> produces:\n{summary}")
     if qpfile and mode in ("flat", "xin1"):
