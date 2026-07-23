@@ -1,4 +1,5 @@
 import json
+import os
 
 
 def test_probe_shape_and_pids(ge, sample_bd):
@@ -43,3 +44,28 @@ def test_cache_invalidated_by_mtime(ge, sample_bd, tmp_path):
     os.utime(clip, (1, 1))
     ge.probe_clip(str(clip), fast=True, cache_dir=cd)
     assert len(list((tmp_path / "cache").iterdir())) == 2  # new key, old orphaned
+
+
+def _cache_key(clip):
+    st = os.stat(clip)
+    return f"{os.path.basename(clip)}.{st.st_size}.{int(st.st_mtime)}.json"
+
+
+def test_corrupt_cache_entry_is_treated_as_miss(ge, sample_bd, tmp_path):
+    clip = str(sample_bd / "STREAM" / "00001.m2ts")
+    cd = str(tmp_path)
+    os.makedirs(cd, exist_ok=True)
+    cf = os.path.join(cd, _cache_key(clip))
+    with open(cf, "w") as f:
+        f.write('{"codec": "h264", "frames": tru')  # truncated mid-write
+    got = ge.probe_clip(clip, cache_dir=cd)  # must re-probe, not raise
+    assert got["frames"] == 96
+    with open(cf) as f:
+        json.load(f)  # cache entry was overwritten with valid JSON
+
+
+def test_cache_write_leaves_no_temp_files(ge, sample_bd, tmp_path):
+    clip = str(sample_bd / "STREAM" / "00001.m2ts")
+    cd = str(tmp_path)
+    ge.probe_clip(clip, cache_dir=cd)
+    assert os.listdir(cd) == [_cache_key(clip)]

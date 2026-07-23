@@ -48,6 +48,7 @@ import random
 import sys
 import shlex
 import subprocess
+import tempfile
 from collections import namedtuple
 from xml.sax.saxutils import escape as xml_escape
 
@@ -223,9 +224,12 @@ def probe_clip(path, fast=False, cache_dir=None):
     key = f"{os.path.basename(path)}.{st.st_size}.{int(st.st_mtime)}.json"
     cf = os.path.join(cache_dir, key) if cache_dir else None
     if cf and os.path.exists(cf):
-        got = json.load(open(cf))
-        if fast or got["frames"] is not None:
-            return got
+        try:
+            got = json.load(open(cf))
+            if fast or got["frames"] is not None:
+                return got
+        except (json.JSONDecodeError, OSError):
+            pass  # corrupt/truncated entry (e.g. interrupted write) - re-probe
     codec, frames, num, den = frame_info(path, count=not fast)
     tracks = [{"tid": t["id"], "type": t["type"],
                "pid": t.get("properties", {}).get("number")}
@@ -236,7 +240,14 @@ def probe_clip(path, fast=False, cache_dir=None):
            "tracks": tracks}
     if cf:
         os.makedirs(cache_dir, exist_ok=True)
-        json.dump(got, open(cf, "w"))
+        fd, tmp = tempfile.mkstemp(dir=cache_dir, prefix=key + ".")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(got, f)
+            os.replace(tmp, cf)  # atomic: readers see old or complete entry, never partial
+        except BaseException:
+            os.unlink(tmp)
+            raise
     return got
 
 
