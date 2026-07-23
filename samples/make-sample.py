@@ -11,6 +11,9 @@ It builds three playlists that exercise every case at once:
   Angled     (00003.mpls): 1 2 [3|21] 4 5
     -> ONE playlist, TWO angles: slot 3 plays clip 3 (angle 1) or 21 (angle 2);
        gen-editions.py auto-expands it into one edition per angle.
+  Mismatch   (00004.mpls): 1 31
+    -> 00031 has only one audio track (eng); exercises the append track-layout
+       mismatch guard.
 
 All segments share identical codecs/resolution/tracks, so both mkvmerge append
 (flat/xin1) and mpv segment linking (linked) are valid.
@@ -33,37 +36,45 @@ import subprocess
 
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
-# id, on-screen tag, colour, seconds, tone Hz
+# id, on-screen tag, colour, seconds, tone Hz, audio languages
+# (00031 deliberately lacks the jpn track: it exercises the append-mismatch
+#  guard via playlist 00004. AC-3 not AAC: ffmpeg's m2ts mode writes AAC with
+#  PMT stream_type 0x06, which mkvmerge silently ignores - every build lost
+#  its audio. AC-3 is BD-legal and gets stream_type 0x81.)
 SEGMENTS = [
-    ("00001", "BOTH",        "red",     4, 220),
-    ("00002", "BOTH",        "orange",  4, 247),
-    ("00003", "THEATRICAL",  "green",   4, 262),
-    ("00004", "BOTH",        "blue",    4, 294),
-    ("00005", "BOTH",        "purple",  4, 330),
-    ("00011", "EXTENDED",    "teal",    5, 349),
-    ("00012", "EXTENDED",    "magenta", 5, 392),
-    ("00013", "EXTENDED",    "brown",   4, 440),
-    ("00021", "ANGLE2",      "gold",    4, 494),
+    ("00001", "BOTH",        "red",     4, 220, ("eng", "jpn")),
+    ("00002", "BOTH",        "orange",  4, 247, ("eng", "jpn")),
+    ("00003", "THEATRICAL",  "green",   4, 262, ("eng", "jpn")),
+    ("00004", "BOTH",        "blue",    4, 294, ("eng", "jpn")),
+    ("00005", "BOTH",        "purple",  4, 330, ("eng", "jpn")),
+    ("00011", "EXTENDED",    "teal",    5, 349, ("eng", "jpn")),
+    ("00012", "EXTENDED",    "magenta", 5, 392, ("eng", "jpn")),
+    ("00013", "EXTENDED",    "brown",   4, 440, ("eng", "jpn")),
+    ("00021", "ANGLE2",      "gold",    4, 494, ("eng", "jpn")),
+    ("00031", "MISMATCH",    "gray",    4, 523, ("eng",)),
 ]
 THEATRICAL = ["00001", "00002", "00003", "00004", "00005"]
 EXTENDED   = ["00001", "00002", "00011", "00004", "00012", "00005", "00013"]
 ANGLED     = ["00001", "00002", ("00003", "00021"), "00004", "00005"]
+MISMATCH   = ["00001", "00031"]
 
 
-def make_segment(path, seg_id, tag, colour, dur, hz):
+def make_segment(path, seg_id, tag, colour, dur, hz, langs):
     label = f"SEG {seg_id} {tag}"
     vf = (f"drawtext=fontfile={FONT}:text='{label}':fontcolor=white:"
           f"fontsize=64:box=1:boxcolor=black@0.5:boxborderw=12:"
           f"x=(w-text_w)/2:y=(h-text_h)/2") if os.path.exists(FONT) else "null"
-    subprocess.run([
-        "ffmpeg", "-y", "-loglevel", "error",
-        "-f", "lavfi", "-i", f"color=c={colour}:s=1280x720:d={dur}:r=24",
-        "-f", "lavfi", "-i", f"sine=frequency={hz}:duration={dur}",
-        "-vf", vf,
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
-        "-c:a", "aac", "-ar", "48000", "-ac", "2",
-        "-f", "mpegts", path,
-    ], check=True)
+    cmd = ["ffmpeg", "-y", "-loglevel", "error",
+           "-f", "lavfi", "-i", f"color=c={colour}:s=1280x720:d={dur}:r=24"]
+    for k, _lang in enumerate(langs):        # distinct tone per language
+        cmd += ["-f", "lavfi", "-i", f"sine=frequency={hz * (k + 1)}:duration={dur}"]
+    cmd += ["-vf", vf,
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
+            "-c:a", "ac3", "-ar", "48000", "-ac", "2", "-map", "0:v"]
+    for k in range(len(langs)):
+        cmd += ["-map", f"{k + 1}:a"]
+    cmd += ["-f", "mpegts", path]
+    subprocess.run(cmd, check=True)
 
 
 def write_mpls(path, slots, durs):
@@ -104,22 +115,25 @@ def write_mpls(path, slots, durs):
     open(path, "wb").write(header + playlist_block + mark_block)
 
 
-def main():
-    out_dir = sys.argv[1] if len(sys.argv) > 1 else "sample"
+def main(out_dir=None):
+    out_dir = out_dir or (sys.argv[1] if len(sys.argv) > 1 else "sample")
     stream = os.path.join(out_dir, "BDMV", "STREAM")
     playlist = os.path.join(out_dir, "BDMV", "PLAYLIST")
     shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(stream); os.makedirs(playlist)
 
     durs = {}
-    for seg_id, tag, colour, dur, hz in SEGMENTS:
+    langmap = {}
+    for seg_id, tag, colour, dur, hz, langs in SEGMENTS:
         print(f"  encoding {seg_id} ({tag}, {dur}s)")
-        make_segment(os.path.join(stream, f"{seg_id}.m2ts"), seg_id, tag, colour, dur, hz)
+        make_segment(os.path.join(stream, f"{seg_id}.m2ts"), seg_id, tag, colour, dur, hz, langs)
         durs[seg_id] = dur
+        langmap[seg_id] = langs
 
     write_mpls(os.path.join(playlist, "00001.mpls"), THEATRICAL, durs)
     write_mpls(os.path.join(playlist, "00002.mpls"), EXTENDED, durs)
     write_mpls(os.path.join(playlist, "00003.mpls"), ANGLED, durs)
+    write_mpls(os.path.join(playlist, "00004.mpls"), MISMATCH, durs)
 
     def slot_str(s):
         return s if isinstance(s, str) else "[" + "|".join(s) + "]"
@@ -128,6 +142,7 @@ def main():
     print(f"  Theatrical (00001.mpls): {' '.join(THEATRICAL)}")
     print(f"  Extended   (00002.mpls): {' '.join(EXTENDED)}")
     print(f"  Angled     (00003.mpls): {' '.join(slot_str(s) for s in ANGLED)}  (2 angles)")
+    print(f"  Mismatch   (00004.mpls): {' '.join(MISMATCH)}")
     print("\nNext:")
     print(f'  ./mkv-editions.sh {out_dir}/BDMV ./out --title Sample \\')
     print('      "Theatrical=00001.mpls" "Extended=00002.mpls"')
