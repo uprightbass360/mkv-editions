@@ -2,6 +2,7 @@
 and land in a generated SHELL SCRIPT and in output filenames."""
 import json
 import os
+import shlex
 import subprocess
 import sys
 
@@ -51,7 +52,11 @@ def test_control_char_in_edition_name_rejected(sample_bd, tmp_path, bad):
     pf = write_proj(tmp_path, sample_bd, editions=ed(bad))
     r = run_cli(["--project", pf, str(tmp_path / "o")])
     assert r.returncode != 0
-    assert "name" in (r.stdout + r.stderr)
+    out = r.stdout + r.stderr
+    # "editions[0].name" (not just "name") rules out the unrelated "every
+    # edition needs a name and clips" branch, which also contains "name".
+    assert "editions[0].name" in out
+    assert "control character" in out
 
 
 def test_injected_project_never_reaches_build_sh(sample_bd, tmp_path):
@@ -82,8 +87,12 @@ def run_script(script, tmp_path):
     stub.write_text("#!/bin/sh\nexit 0\n")
     stub.chmod(0o755)
     (d / "build.sh").write_text(script)
-    subprocess.run(["bash", "build.sh"], cwd=d, capture_output=True,
-                   env=dict(os.environ, PATH=f"{sbin}:{os.environ['PATH']}"))
+    r = subprocess.run(["bash", "build.sh"], cwd=d, capture_output=True,
+                       env=dict(os.environ, PATH=f"{sbin}:{os.environ['PATH']}"))
+    # positive control: the script must actually run to completion, or a
+    # "no PWNED" assertion downstream could pass for the wrong reason (the
+    # script died before ever reaching the payload line).
+    assert r.returncode == 0, r.stderr
     return d
 
 
@@ -111,6 +120,21 @@ def test_build_linked_comment_cannot_start_a_new_line(ge, tmp_path):
     assert not (run_script(script, tmp_path) / "PWNED").exists(), script
 
 
+def test_build_linked_segment_filename_quoted(ge, tmp_path):
+    """seg{c}.mkv (line ~826) must be quoted the same way the master output
+    line already is. load_project never validates editions[].clips, so a
+    clip id that is int()-parseable (uid_for needs that) but not a bare
+    shell token - e.g. a leading space - must not land in build.sh unquoted."""
+    clip = " 2"
+    ci = {"1": ge.ClipInfo(96, 24, 1, 4_000_000_000, "h264"),
+          clip: ge.ClipInfo(96, 24, 1, 4_000_000_000, "h264")}
+    script, _w = ge.build_linked("/s", str(tmp_path), "T",
+                                 [("E", [("1", 0, 0), (clip, 0, 0)],
+                                   [(), ()])], ci, False)
+    assert shlex.quote(f"seg{clip}.mkv") in script
+    assert f"-o seg{clip}.mkv " not in script
+
+
 # ---------------------------------------------------------------------------
 # path traversal: title/name become chapters.xml and qpfile filenames
 # ---------------------------------------------------------------------------
@@ -127,7 +151,11 @@ def test_traversal_in_edition_name_rejected(sample_bd, tmp_path, bad):
     pf = write_proj(tmp_path, sample_bd, editions=ed(bad))
     r = run_cli(["--project", pf, str(tmp_path / "o")])
     assert r.returncode != 0
-    assert "name" in (r.stdout + r.stderr)
+    out = r.stdout + r.stderr
+    # "editions[0].name" (not just "name") rules out the unrelated "every
+    # edition needs a name and clips" branch, which also contains "name".
+    assert "editions[0].name" in out
+    assert "path separator" in out or "path component" in out
 
 
 def test_traversal_writes_nothing_outside_out_dir(sample_bd, tmp_path):
@@ -138,6 +166,18 @@ def test_traversal_writes_nothing_outside_out_dir(sample_bd, tmp_path):
     r = run_cli(["--project", pf, str(out)])
     assert r.returncode != 0
     # "../P.E.chapters.xml" relative to out_dir would land here
+    assert not list(tmp_path.glob("*.chapters.xml"))
+
+
+def test_argv_title_traversal_writes_nothing_outside_out_dir(sample_bd, tmp_path):
+    """A GUI shelling out with a user-supplied title has no project file to
+    validate - the argv --title path must reject '..' the same way."""
+    out = tmp_path / "out"
+    out.mkdir()
+    r = run_cli([str(sample_bd), str(out), "--title", "../ESCAPED",
+                "--preserve-chapters", "--fast", "T=00001.mpls"])
+    assert r.returncode != 0
+    # "../ESCAPED.T.chapters.xml" relative to out_dir would land here
     assert not list(tmp_path.glob("*.chapters.xml"))
 
 

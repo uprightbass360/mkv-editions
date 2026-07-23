@@ -823,8 +823,9 @@ def build_flat(stream, out_dir, title, editions, clipinfo, preserve, qpfile,
 def build_linked(stream, out_dir, title, editions, clipinfo, preserve,
                  clip_opts=None):
     order = unique_clips(editions)
-    remux = [f"mkvmerge -o seg{c}.mkv --no-chapters --segment-uid 0x{uid_for(c)} "
-             f"{input_spec(stream, c, clip_opts)}" for c in order]
+    remux = [f"mkvmerge -o {shlex.quote(f'seg{c}.mkv')} --no-chapters "
+             f"--segment-uid 0x{uid_for(c)} {input_spec(stream, c, clip_opts)}"
+             for c in order]
 
     def atom_fn(clip, start, end, hidden, label):
         return atom_xml(start, end, hidden, label, seg_uid=uid_for(clip))
@@ -964,6 +965,10 @@ def main():
     else:
         bdmv, out_dir, mode, title = (args.bdmv, args.out_dir, args.mode,
                                       args.title)
+        # argv title is as attacker-influenceable as a project's (a GUI may
+        # shell out with a user-supplied one) - same boundary check as
+        # load_project.
+        check_name("--title", "value", title)
         preserve, qpfile = args.preserve, args.qpfile
         editions = load_editions(bdmv, args.eds)
         stream = os.path.abspath(os.path.join(bdmv, "STREAM"))
