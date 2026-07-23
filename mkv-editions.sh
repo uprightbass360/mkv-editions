@@ -6,6 +6,7 @@
 #   ./mkv-editions.sh [--install-deps] <BDMV_dir> <out_dir> \
 #       [--mode flat|linked|xin1] [--title NAME] [--preserve-chapters] [--qpfile] \
 #       "<Edition>=<playlist.mpls>" ...
+#   (also forwarded: --scan-json --fast --cache DIR --seed N --project FILE)
 #   (all options are forwarded verbatim to src/gen-editions.py)
 #
 #   --install-deps   install any missing dependencies, then continue
