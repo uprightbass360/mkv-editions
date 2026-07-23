@@ -364,6 +364,22 @@ with the same seed produce byte-identical `build.sh`/`chapters.xml`/`tags.xml`.
 Unset by default (EditionUIDs are random, per spec). This exists for testing
 and for round-tripping argv output against `--project` output.
 
+Known accepted divergences:
+- **Project marks are a union across playlists.** With `--preserve-chapters`,
+  an authored edition (built from a `--project` clip list) has no PlayItem
+  indices to bind a mark to one specific occurrence, so each clip's marks are
+  the union of that clip's marks across every playlist on the disc - not any
+  one playlist's view. On `samples/make-sample.py`'s disc this is
+  indistinguishable from the playlist-derived path, since every clip carries
+  exactly one mark; on a real disc where two playlists mark the same shared
+  clip differently, the authored edition gets both marks, not either
+  playlist's alone. This also bounds `tests/test_roundtrip.py`: because the
+  sample's marks are uniform, a divergence of exactly this kind would pass
+  its byte-identical round-trip check silently.
+- **Missing-clip errors no longer name the edition.** `gather_clips` used to
+  report which edition referenced a missing clip; it now exits with just the
+  path (`missing clip: <path>`). Accepted as a minor regression.
+
 Assumptions / when to intervene (linked mode):
 - Assumes each PlayItem uses the WHOLE clip (start 0 -> duration). True for real
   seamless-branching discs. If a playlist references only a sub-range, the script
