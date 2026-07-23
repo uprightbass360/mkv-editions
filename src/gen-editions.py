@@ -119,8 +119,8 @@ STREAM_CODECS = {
 
 def parse_stn(it, off):
     """Parse the STN table at offset off inside a PlayItem. Tolerant: skips by
-    the length fields, keeps unknown coding types as kind "other", never reads
-    past the table. Returns primary video + audio + PG streams."""
+    the length fields, classifies each stream via STREAM_CODECS (unmapped
+    coding types become kind "other"), never reads past the table."""
     if off + 4 > len(it):
         return []
     end = min(off + 2 + int.from_bytes(it[off:off + 2], "big"), len(it))
