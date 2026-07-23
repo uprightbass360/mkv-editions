@@ -205,20 +205,29 @@ def clip_duration_ns(frames, num, den, path):
     return ffprobe_duration_ns(path)
 
 
-def edition_mark_positions(items, marks, clipinfo):
-    """Chapter-mark timestamps mapped to ns offsets on this edition's virtual timeline."""
-    offsets, off = [], 0
-    for clip, _i, _o in items:
-        offsets.append(off)
-        off += clipinfo[clip].dur
-    out = set()
+def clip_marks_from(items, marks):
+    """Re-key playlist marks from PlayItem index to per-clip ns offsets, so a
+    mark travels with its clip when an authored edition re-sequences it. A
+    mark on a multi-angle item attaches to every angle's clip."""
+    out = {}
     for pi, ts in marks:
-        if pi >= len(items):
-            continue
-        _clip, in_t, _out = items[pi]
-        p = offsets[pi] + int(round((ts - in_t) * NS / TICKS))
-        if p > 0:
-            out.add(p)
+        clips, in_t, _o = items[pi]
+        off = int(round((ts - in_t) * NS / TICKS))
+        for c in clips:
+            out.setdefault(c, set()).add(off)
+    return {c: tuple(sorted(v)) for c, v in out.items()}
+
+
+def edition_mark_positions(items, clip_marks, clipinfo):
+    """Chapter-mark timestamps mapped onto this edition's virtual timeline:
+    each occurrence of a clip contributes that clip's marks at its offset."""
+    out, off = set(), 0
+    for clip, _i, _o in items:
+        for m in clip_marks.get(clip, ()):
+            p = off + m
+            if p > 0 and m < clipinfo[clip].dur:
+                out.add(p)
+        off += clipinfo[clip].dur
     return sorted(out)
 
 
@@ -330,11 +339,12 @@ def load_editions(bdmv, eds):
             print(f"  ! {name}: {len(marks) - len(valid)} chapter mark(s) reference "
                   "missing PlayItems - dropped")
         marks = valid
+        cm = clip_marks_from(items, marks)
         for a in range(n_ang):
             ed_name = name if a == 0 else f"{name} (Angle {a + 1})"
             ed_items = [(clips[a] if a < len(clips) else clips[0], i, o)
                         for clips, i, o in items]
-            out.append((ed_name, ed_items, marks))
+            out.append((ed_name, ed_items, cm))
     return out
 
 
@@ -577,7 +587,8 @@ def main():
 
     print(f"mode: {mode}  preserve-chapters: {preserve}  qpfile: {qpfile}")
     print("editions: " + ", ".join(
-        f"{n} ({len(i)} segs, {len(m)} marks)" for n, i, m in editions))
+        f"{n} ({len(i)} segs, {sum(len(v) for v in m.values())} marks)"
+        for n, i, m in editions))
     print(f"wrote {out_dir}/build.sh -> produces:\n{summary}")
     if qpfile and mode in ("flat", "xin1"):
         print("  qpfile(s) written - consume only if you RE-ENCODE a cut:")
