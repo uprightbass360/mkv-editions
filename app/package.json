@@ -1,0 +1,22 @@
+{
+  "name": "mkv-editions-app",
+  "private": true,
+  "version": "0.0.1",
+  "workspaces": ["renderer"],
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "build:electron": "tsup",
+    "build:renderer": "npm run build --workspace renderer",
+    "build": "npm run build:renderer && npm run build:electron",
+    "start": "electron . --no-sandbox",
+    "dev:renderer": "npm run dev --workspace renderer -- --port 5173",
+    "dev:electron": "npm run build:electron && cross-env ELECTRON_RENDERER_DEV_URL=http://localhost:5173 electron . --no-sandbox",
+    "test": "npm run test --workspace renderer"
+  },
+  "devDependencies": {
+    "electron": "43.2.0",
+    "tsup": "8.5.1",
+    "typescript": "6.0.3",
+    "cross-env": "7.0.3"
+  }
+}
