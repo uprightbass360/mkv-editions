@@ -8,4 +8,9 @@ build.sh
 
 __pycache__/
 *.pyc
+.pytest_cache/
+pytest-of-*/
 .superpowers/
+
+# test discs (large; never commit)
+*.iso
