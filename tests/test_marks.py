@@ -33,6 +33,22 @@ def test_marks_travel_when_resequenced(ge, sample_bd):
     assert pos == [2 * ge.NS, 6 * ge.NS]   # mark follows each clip
 
 
+def test_editions_xml_no_marks_stays_whole_clip(ge):
+    # marks_by_item returns one EMPTY tuple per item for a mark-free playlist,
+    # so item_marks here is [(), ()] - truthy as a list, but any(marks) is
+    # False. That must route editions_xml to positions=None (whole-clip
+    # atoms), NOT positions=[] (split-shape: first atom visible, the rest
+    # hidden joins with no ChapterDisplay). Pins the `any(marks)` guard.
+    items = [("A", 0, 0), ("B", 0, 0)]
+    item_marks = [(), ()]
+    ci = {c: ge.ClipInfo(None, 24, 1, 4 * ge.NS, "h264") for c in "AB"}
+    atom_fn = lambda clip, start, end, hidden, label: ge.atom_xml(start, end, hidden, label)
+    xml, _tags = ge.editions_xml([("T", items, item_marks)], ci, True, atom_fn)
+    assert xml.count("<ChapterAtom>") == 2
+    assert xml.count("<ChapterFlagHidden>1</ChapterFlagHidden>") == 0
+    assert "T 01" in xml and "T 02" in xml
+
+
 def test_angle_marks_attach_to_all_angle_clips(ge, sample_bd):
     raw_items, marks, _s = ge.parse_mpls(
         str(sample_bd / "PLAYLIST" / "00003.mpls"))

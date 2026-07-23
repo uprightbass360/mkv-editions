@@ -211,6 +211,8 @@ def marks_by_item(items, marks):
     appear more than once in one edition)."""
     per = [set() for _ in items]
     for pi, ts in marks:
+        if pi >= len(items):
+            continue
         _clips, in_t, _o = items[pi]
         per[pi].add(int(round((ts - in_t) * NS / TICKS)))
     return [tuple(sorted(s)) for s in per]
