@@ -24,11 +24,19 @@ OPTIONS
                          emit them as real chapters in each edition
   --qpfile               (flat/xin1) emit an x264/x265 --qpfile forcing IDR
                          frames at each segment join, for seamless re-encoding
+  --seed N               seed random (deterministic EditionUIDs, for testing)
+  --scan-json [--fast] [--cache DIR]
+                         scan BDMV_dir and emit a JSON description instead of
+                         building anything
+  --project FILE.mkvedproj
+                         build from a project file (names its own BDMV_dir)
 
 USAGE
   gen-editions.py <BDMV_dir> <out_dir> [--mode flat|linked|xin1] [--title NAME]
-                  [--preserve-chapters] [--qpfile]
+                  [--preserve-chapters] [--qpfile] [--seed N]
                   "<Edition Name>=<playlist.mpls>" [ ... ]
+  gen-editions.py <BDMV_dir> --scan-json [--fast] [--cache DIR]
+  gen-editions.py --project FILE.mkvedproj <out_dir> [--seed N]
 
 Requires mkvmerge (+ ffprobe) on PATH. MPLS PlayItem/PlayListMark tables are
 parsed directly (no libbluray/mpls_dump needed); MPLS timestamps are 45 kHz.
@@ -307,9 +315,14 @@ def partial_clip_warnings(editions, clipinfo):
 # ---------------------------------------------------------------------------
 # args
 # ---------------------------------------------------------------------------
+Args = namedtuple("Args", "bdmv out_dir mode title preserve qpfile eds "
+                          "scan fast cache seed project")
+
+
 def parse_args(argv):
     mode, title, pos, eds = "flat", "movie", [], []
-    preserve = qpfile = False
+    preserve = qpfile = scan = fast = False
+    cache = seed = project = None
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -325,13 +338,36 @@ def parse_args(argv):
             preserve = True; i += 1; continue
         if a == "--qpfile":
             qpfile = True; i += 1; continue
+        if a == "--scan-json":
+            scan = True; i += 1; continue
+        if a == "--fast":
+            fast = True; i += 1; continue
+        if a == "--cache":
+            cache = argv[i + 1]; i += 2; continue
+        if a == "--seed":
+            seed = int(argv[i + 1]); i += 2; continue
+        if a == "--project":
+            project = argv[i + 1]; i += 2; continue
         if "=" in a and len(pos) >= 2:
             name, mpls = a.split("=", 1)
             eds.append((name, mpls)); i += 1; continue
         pos.append(a); i += 1
-    if len(pos) < 2 or not eds or mode not in ("flat", "linked", "xin1"):
+    if mode not in ("flat", "linked", "xin1"):
         sys.exit(__doc__)
-    return pos[0], pos[1], mode, title, preserve, qpfile, eds
+    if scan:
+        if len(pos) < 1:
+            sys.exit(__doc__)
+        return Args(pos[0], None, mode, title, preserve, qpfile, eds,
+                    True, fast, cache, seed, None)
+    if project:
+        if len(pos) < 1:
+            sys.exit(__doc__)
+        return Args(None, pos[0], mode, title, preserve, qpfile, eds,
+                    False, fast, cache, seed, project)
+    if len(pos) < 2 or not eds:
+        sys.exit(__doc__)
+    return Args(pos[0], pos[1], mode, title, preserve, qpfile, eds,
+                False, fast, cache, seed, None)
 
 
 def load_editions(bdmv, eds):
@@ -576,7 +612,13 @@ def build_xin1(stream, out_dir, title, editions, clipinfo, preserve, qpfile):
 
 
 def main():
-    bdmv, out_dir, mode, title, preserve, qpfile, eds = parse_args(sys.argv[1:])
+    args = parse_args(sys.argv[1:])
+    if args.seed is not None:
+        random.seed(args.seed)
+    if args.scan or args.project:
+        sys.exit("scan/project: not implemented yet")   # replaced in Tasks 6/7
+    bdmv, out_dir, mode, title = args.bdmv, args.out_dir, args.mode, args.title
+    preserve, qpfile, eds = args.preserve, args.qpfile, args.eds
     editions = load_editions(bdmv, eds)
     stream = os.path.abspath(os.path.join(bdmv, "STREAM"))
     os.makedirs(out_dir, exist_ok=True)
