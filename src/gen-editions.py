@@ -477,6 +477,23 @@ def parse_args(argv):
                 False, fast, cache, seed, None)
 
 
+def load_project(path):
+    """Validate and return a .mkvedproj (version 1). The project file is the
+    GUI/CLI contract: everything the app can author must round-trip here."""
+    p = json.load(open(path))
+    if p.get("version") != 1:
+        sys.exit(f"{path}: unsupported project version {p.get('version')!r}")
+    for k in ("bdmv", "title", "mode", "editions"):
+        if k not in p:
+            sys.exit(f"{path}: missing {k!r}")
+    if p["mode"] not in ("flat", "linked", "xin1"):
+        sys.exit(f"{path}: bad mode {p['mode']!r}")
+    for ed in p["editions"]:
+        if not ed.get("name") or not ed.get("clips"):
+            sys.exit(f"{path}: every edition needs a name and clips")
+    return p
+
+
 def load_editions(bdmv, eds):
     """Parse each playlist; a multi-angle playlist expands to one edition per
     angle (angle k plays each item's k-th clip, base clip where absent)."""
@@ -765,15 +782,43 @@ def main():
     if args.scan:
         run_scan(args)
         return
+    tracks_sel = cstreams = None
     if args.project:
-        sys.exit("project: not implemented yet")       # replaced in Task 7
-    bdmv, out_dir, mode, title = args.bdmv, args.out_dir, args.mode, args.title
-    preserve, qpfile, eds = args.preserve, args.qpfile, args.eds
-    editions = load_editions(bdmv, eds)
-    stream = os.path.abspath(os.path.join(bdmv, "STREAM"))
+        p = load_project(args.project)
+        if args.eds or args.mode != "flat" or args.title != "movie" \
+                or args.preserve or args.qpfile:
+            print("  ! --project given: CLI mode/title/flag arguments ignored")
+        bdmv, mode, title = p["bdmv"], p["mode"], p["title"]
+        preserve = bool(p.get("preserve_chapters"))
+        qpfile = bool(p.get("qpfile"))
+        tracks_sel = p.get("tracks")
+        _pls, cmarks, cstreams, _w = sweep_playlists(bdmv)
+        stream = os.path.abspath(os.path.join(bdmv, "STREAM"))
+        clip_order = []
+        for ed in p["editions"]:
+            for c in ed["clips"]:
+                if c not in clip_order:
+                    clip_order.append(c)
+        clipinfo, probes = gather_clips(stream, clip_order,
+                                        cache_dir=args.cache)
+        editions = []
+        for ed in p["editions"]:
+            items = [(c, 0, int(round(clipinfo[c].dur * TICKS / NS)))
+                     for c in ed["clips"]]
+            # authored editions have no PlayItem indices: each occurrence of a
+            # clip gets that clip's disc marks (marks travel with the clip)
+            im = [tuple(cmarks.get(c, ())) for c in ed["clips"]]
+            editions.append((ed["name"], items, im))
+        out_dir = args.out_dir
+    else:
+        bdmv, out_dir, mode, title = (args.bdmv, args.out_dir, args.mode,
+                                      args.title)
+        preserve, qpfile = args.preserve, args.qpfile
+        editions = load_editions(bdmv, args.eds)
+        stream = os.path.abspath(os.path.join(bdmv, "STREAM"))
+        clipinfo, probes = gather_clips(stream, unique_clips(editions),
+                                        cache_dir=args.cache)
     os.makedirs(out_dir, exist_ok=True)
-    clipinfo, probes = gather_clips(stream, unique_clips(editions),
-                                    cache_dir=args.cache)
 
     warnings = vc1_warnings(clipinfo, mode)
     if mode == "flat":
