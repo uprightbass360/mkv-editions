@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { findBdmv, detectZipTool, extractZip, feedPercents, resolveInput, cleanupExtractions } from './disc-input'
+import { findBdmv, detectZipTool, extractZip, feedPercents, resolveInput, cleanupExtractions, createOpener } from './disc-input'
 
 function mkPlaylist(dir: string) {
   mkdirSync(join(dir, 'PLAYLIST'), { recursive: true })
@@ -103,4 +103,25 @@ describe('resolveInput', () => {
     if (res.ok) expect(findBdmv(res.bdmvPath) === res.bdmvPath || res.bdmvPath.length > 0).toBe(true)
     cleanupExtractions()
   }, 30_000)
+})
+
+describe('createOpener defaultPath', () => {
+  it('uses / first, then the dirname of the last successful pick', async () => {
+    const calls: any[] = []
+    const opener = createOpener({
+      showOpenDialog: async (opts) => { calls.push(opts); return { canceled: false, filePaths: ['/mnt/br/BDMV'] } },
+      resolve: async () => ({ ok: true, bdmvPath: '/mnt/br/BDMV' }),
+    })
+    await opener.openInput('folder', () => {})
+    await opener.openInput('folder', () => {})
+    expect(calls[0].defaultPath).toBe('/')
+    expect(calls[1].defaultPath).toBe('/mnt/br')
+  })
+  it('returns null when the dialog is cancelled', async () => {
+    const opener = createOpener({
+      showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
+      resolve: async () => ({ ok: true, bdmvPath: 'x' }),
+    })
+    expect(await opener.openInput('zip', () => {})).toBe(null)
+  })
 })

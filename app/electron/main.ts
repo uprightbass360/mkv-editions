@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { scanDisc } from './scan'
 import { writeProjectFile, readProjectFile } from './project-io'
+import { createOpener, cleanupExtractions } from './disc-input'
 
 // Built to CJS by tsup, so __dirname is available natively at runtime.
 const dirname = __dirname
@@ -50,10 +51,9 @@ ipcMain.handle('scan', async (event, bdmv: string) => {
   return scanDisc(bdmv, cacheDir, (p) => event.sender.send('scan:progress', p))
 })
 
-ipcMain.handle('pickBdmv', async () => {
-  const r = await dialog.showOpenDialog({ properties: ['openDirectory'] })
-  return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]
-})
+const opener = createOpener({ showOpenDialog: (opts) => dialog.showOpenDialog(opts) })
+ipcMain.handle('openInput', async (event, kind: 'folder' | 'zip') =>
+  opener.openInput(kind, (p) => event.sender.send('extract:progress', p)))
 
 ipcMain.handle('saveProject', async (_e, json: unknown, title: string) => {
   const r = await dialog.showSaveDialog({ defaultPath: `${title || 'movie'}.mkvedproj` })
@@ -91,3 +91,4 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
+app.on('will-quit', () => cleanupExtractions())

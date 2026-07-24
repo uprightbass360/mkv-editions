@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, statSync, mkdtempSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 
@@ -145,4 +145,29 @@ export async function resolveInput(
   return bdmv
     ? { ok: true, bdmvPath: bdmv }
     : { ok: false, error: `No BDMV/PLAYLIST found in the extracted archive` }
+}
+
+export function createOpener(deps: {
+  showOpenDialog: (opts: any) => Promise<{ canceled: boolean; filePaths: string[] }>
+  resolve?: typeof resolveInput
+}) {
+  let lastDir: string | undefined
+  const resolve = deps.resolve ?? resolveInput
+  async function openInput(
+    kind: 'folder' | 'zip',
+    onProgress: (p: ExtractProgress) => void,
+  ): Promise<OpenInputResult | null> {
+    const base = { defaultPath: lastDir ?? '/' }
+    const opts =
+      kind === 'folder'
+        ? { ...base, properties: ['openDirectory'] }
+        : { ...base, properties: ['openFile'], filters: [{ name: 'zip', extensions: ['zip'] }] }
+    const r = await deps.showOpenDialog(opts)
+    if (r.canceled || r.filePaths.length === 0) return null
+    const picked = r.filePaths[0]
+    const res = await resolve({ kind, path: picked }, onProgress)
+    if (res.ok) lastDir = dirname(picked)
+    return res
+  }
+  return { openInput }
 }
