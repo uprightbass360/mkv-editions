@@ -42,6 +42,29 @@ export function findBdmv(rootDir: string): string | null {
 
 export type ExtractProgress = { percent: number }
 
+/**
+ * Scan buf+chunk for complete "NN%" tokens, calling onPct once per token
+ * (only for 0 < pct < 100), and return the unprocessed remainder (which may
+ * hold a partial token like " 4" of a coming "45%").
+ */
+export function feedPercents(buf: string, chunk: string, onPct: (pct: number) => void): string {
+  buf += chunk
+  const re = /(\d{1,3})%/g
+  let m: RegExpExecArray | null
+  let lastEnd = 0
+  while ((m = re.exec(buf))) {
+    const pct = Math.min(100, parseInt(m[1], 10))
+    if (pct > 0 && pct < 100) onPct(pct)
+    lastEnd = re.lastIndex
+  }
+  // keep only the unprocessed remainder after the last full match (may hold a
+  // partial token like " 4" of a coming "45%"); cap it so non-percent output
+  // cannot grow the buffer without bound.
+  buf = buf.slice(lastEnd)
+  if (buf.length > 16) buf = buf.slice(-16)
+  return buf
+}
+
 /** First of 7z/7za/unzip found on PATH, else null. */
 export function detectZipTool(pathEnv: string = process.env.PATH || ''): string | null {
   const dirs = pathEnv.split(':').filter(Boolean)
@@ -68,14 +91,7 @@ export function extractZip(
     let err = ''
     let buf = ''
     child.stdout.on('data', (d) => {
-      buf += d
-      let m: RegExpExecArray | null
-      const re = /(\d{1,3})%/g
-      while ((m = re.exec(buf))) {
-        const pct = Math.min(100, parseInt(m[1], 10))
-        if (pct > 0 && pct < 100) onProgress({ percent: pct })
-      }
-      buf = buf.slice(-8) // keep a small tail for split percents
+      buf = feedPercents(buf, String(d), (pct) => onProgress({ percent: pct }))
     })
     child.stderr.on('data', (d) => { err += d })
     child.on('error', (e) => reject(new Error(String(e.message || e))))

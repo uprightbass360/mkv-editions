@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { findBdmv, detectZipTool, extractZip } from './disc-input'
+import { findBdmv, detectZipTool, extractZip, feedPercents } from './disc-input'
 
 function mkPlaylist(dir: string) {
   mkdirSync(join(dir, 'PLAYLIST'), { recursive: true })
@@ -30,6 +30,19 @@ describe('findBdmv', () => {
     const root = mkdtempSync(join(tmpdir(), 'fb-'))
     mkdirSync(join(root, 'PLAYLIST'), { recursive: true }) // empty, no .mpls
     expect(findBdmv(root)).toBe(null)
+  })
+})
+
+describe('feedPercents', () => {
+  it('emits each percent exactly once across chunk boundaries, incl. a split token', () => {
+    const seen: number[] = []
+    let buf = ''
+    buf = feedPercents(buf, ' 10%', (p) => seen.push(p))
+    buf = feedPercents(buf, ' 20%', (p) => seen.push(p))
+    buf = feedPercents(buf, ' 30%', (p) => seen.push(p))
+    buf = feedPercents(buf, ' 45', (p) => seen.push(p))
+    buf = feedPercents(buf, '%', (p) => seen.push(p))
+    expect(seen).toEqual([10, 20, 30, 45])
   })
 })
 
