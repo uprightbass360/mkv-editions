@@ -22,6 +22,11 @@ declare global {
     | { ok: true; outputs: string[] }
     | { ok: false; error: string }
 
+  interface BuildLog { line: string }
+  type InspectResult =
+    | { ok: true; outputs: string[]; existing: string[] }
+    | { ok: false; error: string }
+
   interface ElectronApi {
     ping: () => Promise<string>
     scanDisc: (bdmv: string) => Promise<ScanResult>
@@ -30,8 +35,11 @@ declare global {
     onExtractProgress: (cb: (p: ExtractProgress) => void) => () => void
     saveProject: (json: unknown, title: string) => Promise<SaveProjectResult>
     openProject: () => Promise<OpenProjectResult | null>
-    buildProject: (json: unknown) => Promise<BuildResult | null>
+    buildPickFolder: () => Promise<string | null>
+    buildInspect: (json: unknown, outdir: string) => Promise<InspectResult>
+    buildRun: (json: unknown, outdir: string, overwrite: boolean) => Promise<BuildResult>
     onBuildProgress: (cb: (p: BuildProgress) => void) => () => void
+    onBuildLog: (cb: (p: BuildLog) => void) => () => void
   }
 
   interface Window {

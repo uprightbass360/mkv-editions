@@ -4,7 +4,7 @@ import path from 'node:path'
 import { scanDisc } from './scan'
 import { writeProjectFile, readProjectFile } from './project-io'
 import { createOpener, cleanupExtractions } from './disc-input'
-import { createBuilder } from './build'
+import { inspectBuild, runBuild } from './build'
 
 // Built to CJS by tsup, so __dirname is available natively at runtime.
 const dirname = __dirname
@@ -69,22 +69,18 @@ ipcMain.handle('openProject', async () => {
   catch (e) { return { ok: false, error: String(e) } }
 })
 
-const builder = createBuilder({
-  showOpenDialog: (opts) => dialog.showOpenDialog(opts),
-  confirmOverwrite: async (names) => {
-    const r = await dialog.showMessageBox({
-      type: 'warning',
-      buttons: ['Overwrite', 'Cancel'],
-      defaultId: 1,
-      cancelId: 1,
-      message: 'Overwrite existing file(s)?',
-      detail: names.join('\n'),
-    })
-    return r.response === 0
-  },
+let lastBuildDir: string | undefined
+ipcMain.handle('buildPickFolder', async () => {
+  const r = await dialog.showOpenDialog({ properties: ['openDirectory'], defaultPath: lastBuildDir ?? '/' })
+  if (r.canceled || r.filePaths.length === 0) return null
+  lastBuildDir = r.filePaths[0]
+  return lastBuildDir
 })
-ipcMain.handle('buildProject', async (event, json: unknown) =>
-  builder.buildProject(json, (p) => event.sender.send('build:progress', p)))
+ipcMain.handle('buildInspect', async (_e, json: unknown, outdir: string) => inspectBuild(json, outdir))
+ipcMain.handle('buildRun', async (event, json: unknown, outdir: string, overwrite: boolean) =>
+  runBuild(json, outdir, overwrite,
+    (p) => event.sender.send('build:progress', p),
+    (line) => event.sender.send('build:log', { line })))
 
 function createWindow() {
   const win = new BrowserWindow({

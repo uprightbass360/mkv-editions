@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
 import { expectedOutputs, unshellFirst } from './build'
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { runBuild, createBuilder } from './build'
+import { inspectBuild, runBuild } from './build'
 
 function fakeChild(opts: { stdout?: string[]; stderr?: string[]; code?: number; errorMsg?: string }) {
   const child: any = new EventEmitter()
@@ -62,72 +62,78 @@ describe('expectedOutputs', () => {
 })
 
 describe('runBuild', () => {
-  it('generates, finds no collision, runs build.sh, streams percent, returns outputs', async () => {
+  it('runs build.sh, streams percent + log lines, returns outputs (no collision)', async () => {
     const dir = outdirWith(SAMPLE_SH)
     const calls: string[][] = []
     const spawnFn: any = (_cmd: string, args: string[]) => {
       calls.push(args)
-      // first call = gen (success, build.sh already on disk); second = bash build.sh
-      return calls.length === 1 ? fakeChild({ code: 0 }) : fakeChild({ stdout: ['Progress: 50%\n'], code: 0 })
+      return calls.length === 1
+        ? fakeChild({ code: 0 })
+        : fakeChild({ stdout: ['mux start\n', 'Progress: 50%\n'], stderr: ['a warning\n'], code: 0 })
     }
-    const seen: number[] = []
-    const confirm = vi.fn(async () => true)
-    const res = await runBuild({ version: 1 }, dir, confirm, (p) => seen.push(p.percent), { spawnFn })
+    const pcts: number[] = []
+    const logs: string[] = []
+    const res = await runBuild({ version: 1 }, dir, false, (p) => pcts.push(p.percent), (l) => logs.push(l), { spawnFn })
     expect(res).toEqual({ ok: true, outputs: [join(dir, 'Movie.mkv')] })
-    expect(confirm).not.toHaveBeenCalled()
-    expect(seen).toContain(50)
+    expect(pcts).toContain(50)
+    expect(logs).toContain('mux start')
+    expect(logs).toContain('a warning')
     expect(calls.length).toBe(2)
-    // no temp mkvedproj left in tmpdir roots we created (the build dir has only build.sh + nothing extra)
-    expect(existsSync(join(dir, 'build.sh'))).toBe(true)
   })
 
-  it('asks to confirm when a target exists and aborts on Cancel without running build.sh', async () => {
+  it('refuses when a target exists and overwrite is false, without running build.sh', async () => {
     const dir = outdirWith(SAMPLE_SH, ['Movie.mkv'])
     let n = 0
     const spawnFn: any = () => { n++; return fakeChild({ code: 0 }) }
-    const confirm = vi.fn(async () => false)
-    const res = await runBuild({ version: 1 }, dir, confirm, () => {}, { spawnFn })
-    expect(confirm).toHaveBeenCalledWith(['Movie.mkv'])
-    expect(res).toEqual({ ok: false, error: 'cancelled' })
-    expect(n).toBe(1) // only the gen spawn ran, not bash build.sh
+    const res = await runBuild({ version: 1 }, dir, false, () => {}, () => {}, { spawnFn })
+    expect(res).toEqual({ ok: false, error: 'overwrite-declined' })
+    expect(n).toBe(1) // gen ran; bash build.sh did not
+  })
+
+  it('proceeds when a target exists and overwrite is true', async () => {
+    const dir = outdirWith(SAMPLE_SH, ['Movie.mkv'])
+    let n = 0
+    const spawnFn: any = () => { n++; return fakeChild({ code: 0 }) }
+    const res = await runBuild({ version: 1 }, dir, true, () => {}, () => {}, { spawnFn })
+    expect(res).toEqual({ ok: true, outputs: [join(dir, 'Movie.mkv')] })
+    expect(n).toBe(2)
   })
 
   it('returns an error when gen-editions exits nonzero', async () => {
     const dir = outdirWith(SAMPLE_SH)
     const spawnFn: any = () => fakeChild({ stderr: ['bad project\n'], code: 1 })
-    const res = await runBuild({ version: 1 }, dir, async () => true, () => {}, { spawnFn })
+    const res = await runBuild({ version: 1 }, dir, false, () => {}, () => {}, { spawnFn })
     expect(res).toEqual({ ok: false, error: 'bad project' })
   })
 
-  it('surfaces a spawn error (e.g. python missing) as an error result', async () => {
+  it('surfaces a spawn error as an error result', async () => {
     const dir = outdirWith(SAMPLE_SH)
     const spawnFn: any = () => fakeChild({ errorMsg: 'spawn python3 ENOENT' })
-    const res = await runBuild({ version: 1 }, dir, async () => true, () => {}, { spawnFn })
+    const res = await runBuild({ version: 1 }, dir, false, () => {}, () => {}, { spawnFn })
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.error).toContain('ENOENT')
   })
 })
 
-describe('createBuilder', () => {
-  it('returns null when the folder picker is cancelled', async () => {
-    const run = vi.fn()
-    const b = createBuilder({
-      showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
-      confirmOverwrite: async () => true, run: run as any,
-    })
-    expect(await b.buildProject({}, () => {})).toBe(null)
-    expect(run).not.toHaveBeenCalled()
+describe('inspectBuild', () => {
+  it('returns outputs and the subset that already exists in outdir', async () => {
+    // outdir already has Movie.mkv; the temp gen dir will hold the sample build.sh
+    const outdir = mkdtempSync(join(tmpdir(), 'mkved-realout-'))
+    writeFileSync(join(outdir, 'Movie.mkv'), 'old')
+    const spawnFn: any = (_cmd: string, args: string[]) => {
+      // gen writes build.sh into args[3] (the gen dir); emulate that here
+      const genDir = args[3]
+      writeFileSync(join(genDir, 'build.sh'), SAMPLE_SH)
+      return fakeChild({ code: 0 })
+    }
+    const res = await inspectBuild({ version: 1 }, outdir, { spawnFn })
+    expect(res).toEqual({ ok: true, outputs: ['Movie.mkv'], existing: ['Movie.mkv'] })
   })
 
-  it('runs the build in the chosen dir and passes confirmOverwrite through', async () => {
-    const run = vi.fn(async () => ({ ok: true, outputs: ['/out/Movie.mkv'] }))
-    const confirmOverwrite = async () => true
-    const b = createBuilder({
-      showOpenDialog: async () => ({ canceled: false, filePaths: ['/out'] }),
-      confirmOverwrite, run: run as any,
-    })
-    const res = await b.buildProject({ version: 1 }, () => {})
-    expect(res).toEqual({ ok: true, outputs: ['/out/Movie.mkv'] })
-    expect(run).toHaveBeenCalledWith({ version: 1 }, '/out', confirmOverwrite, expect.any(Function))
+  it('returns an error when gen-editions exits nonzero', async () => {
+    const outdir = mkdtempSync(join(tmpdir(), 'mkved-realout-'))
+    const spawnFn: any = () => fakeChild({ stderr: ['bad project\n'], code: 1 })
+    const res = await inspectBuild({ version: 1 }, outdir, { spawnFn })
+    expect(res).toEqual({ ok: false, error: 'bad project' })
   })
 })
