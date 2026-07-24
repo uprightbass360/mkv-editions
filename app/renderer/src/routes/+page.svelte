@@ -2,7 +2,8 @@
   import ClipLibrary from '$lib/components/ClipLibrary.svelte'
   import PlaylistPicker from '$lib/components/PlaylistPicker.svelte'
   import EditionTracks from '$lib/components/EditionTracks.svelte'
-  import { libraryClips, playlistRows, longestRealPlaylist, unreadableRatio, type DiscModel } from '$lib/model'
+  import DetailPanel from '$lib/components/DetailPanel.svelte'
+  import { libraryClips, playlistRows, longestRealPlaylist, unreadableRatio, chapterCount, type DiscModel } from '$lib/model'
   import {
     newProject, addEdition, appendClip, removeClip, renameEdition, importPlaylist,
     sharedClipIds, toMkvedproj, fromMkvedproj, type Project,
@@ -15,6 +16,8 @@
 
   let showIso = $state(false)
 
+  let selected = $state<{ kind: 'clip' | 'playlist'; id: string } | null>(null)
+
   async function scanInto(bdmv: string) {
     let off: (() => void) | undefined
     try {
@@ -22,6 +25,7 @@
       const res = await window.api.scanDisc(bdmv)
       if (!res.ok) { progress = 'scan failed: ' + res.error; return }
       model = res.data as DiscModel
+      selected = null
       let p = newProject(model.bdmv)
       const feat = longestRealPlaylist(model)
       if (feat) {
@@ -64,6 +68,10 @@
   let rows = $derived(model ? playlistRows(model) : [])
   let shared = $derived(project ? sharedClipIds(project) : new Set<string>())
   let encrypted = $derived(model ? unreadableRatio(model) > 0.5 : false)
+  let clipChapters = $derived(model ? Object.fromEntries(Object.entries(model.clips).map(([id, c]) => [id, chapterCount(c)])) : {})
+  let playlistChapters = $derived(
+    model ? Object.fromEntries(model.playlists.map((p) => [p.file, p.editions[0].clips.reduce((n, c) => n + (model!.clips[c] ? chapterCount(model!.clips[c]) : 0), 0)])) : {},
+  )
 </script>
 
 <header class="flex items-center gap-2.5 border-b border-primary-border/15 bg-surface px-2 py-1.5 dark:bg-surface-dark">
@@ -71,6 +79,7 @@
   <button class="rounded bg-primary px-3 py-1 font-semibold text-on-primary hover:bg-primary-hover disabled:opacity-50" onclick={() => openAndScan('zip')} disabled={scanning}>Open ZIP...</button>
   <button class="rounded border border-primary-border/25 px-2 py-1 hover:bg-primary/10" onclick={() => (showIso = !showIso)}>Open ISO...</button>
   <button class="rounded border border-primary-border/25 px-2 py-1 hover:bg-primary/10" onclick={pickAndOpen}>Open project...</button>
+  {#if model?.disc.title}<span class="text-sm font-semibold opacity-90">{model.disc.title}</span>{/if}
   {#if project}
     <input class="rounded border border-primary-border/25 bg-surface px-1 dark:bg-surface-dark" bind:value={project.title} />
     <select class="rounded border border-primary-border/25 bg-surface px-1 dark:bg-surface-dark" bind:value={project.mode}>
@@ -97,25 +106,36 @@ udisksctl loop-setup -f your-disc.iso</pre>
   </div>
 {/if}
 
-<main class="grid h-[calc(100vh-52px)] grid-cols-[220px_1fr_300px] gap-2.5 p-2.5">
-  <section class="flex flex-col overflow-hidden"><h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Clips</h3><ClipLibrary clips={lib} /></section>
-  <section class="flex flex-col overflow-hidden">
-    <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Editions</h3>
-    {#if project}
-      <EditionTracks
-        {project} {shared} {clipInfo}
-        onappend={(i, id) => apply((p) => appendClip(p, i, id))}
-        onremove={(i, k) => apply((p) => removeClip(p, i, k))}
-        onrename={(i, name) => apply((p) => renameEdition(p, i, name))}
-        onadd={() => apply((p) => addEdition(p, `Edition ${p.editions.length + 1}`))}
+<div class="flex h-[calc(100vh-52px)] flex-col">
+  <main class="grid min-h-0 flex-1 grid-cols-[220px_1fr_300px] gap-2.5 p-2.5">
+    <section class="flex flex-col overflow-hidden">
+      <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Clips</h3>
+      <ClipLibrary clips={lib} chapters={clipChapters} selectedId={selected?.kind === 'clip' ? selected.id : undefined} onselect={(id) => (selected = { kind: 'clip', id })} />
+    </section>
+    <section class="flex flex-col overflow-hidden">
+      <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Editions</h3>
+      {#if project}
+        <EditionTracks
+          {project} {shared} {clipInfo}
+          onselect={(id) => (selected = { kind: 'clip', id })}
+          onappend={(i, id) => apply((p) => appendClip(p, i, id))}
+          onremove={(i, k) => apply((p) => removeClip(p, i, k))}
+          onrename={(i, name) => apply((p) => renameEdition(p, i, name))}
+          onadd={() => apply((p) => addEdition(p, `Edition ${p.editions.length + 1}`))}
+        />
+      {/if}
+    </section>
+    <section class="flex flex-col overflow-hidden">
+      <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Playlists</h3>
+      <PlaylistPicker
+        {rows} chapters={playlistChapters}
+        selectedFile={selected?.kind === 'playlist' ? selected.id : undefined}
+        onselect={(file) => (selected = { kind: 'playlist', id: file })}
+        onimport={(file) => { const pl = model?.playlists.find((p) => p.file === file); if (pl) apply((p) => importPlaylist(p, pl)) }}
       />
-    {/if}
-  </section>
-  <section class="flex flex-col overflow-hidden">
-    <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Playlists</h3>
-    <PlaylistPicker {rows} onimport={(file) => {
-      const pl = model?.playlists.find((p) => p.file === file)
-      if (pl) apply((p) => importPlaylist(p, pl))
-    }} />
-  </section>
-</main>
+    </section>
+  </main>
+  <div class="h-40 shrink-0">
+    <DetailPanel {model} {selected} />
+  </div>
+</div>
