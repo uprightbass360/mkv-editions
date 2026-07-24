@@ -84,22 +84,72 @@
   )
 </script>
 
-<header class="flex items-center gap-2.5 border-b border-primary-border/15 bg-surface px-2 py-1.5 dark:bg-surface-dark">
-  <FileMenu
-    scanning={scanning}
-    canSave={!!project}
-    onOpenFolder={() => openAndScan('folder')}
-    onOpenZip={() => openAndScan('zip')}
-    onOpenIso={() => (showIso = true)}
-    onOpenProject={pickAndOpen}
-    onSaveProject={saveProject}
-  />
-  {#if model?.disc.title}<span class="text-sm font-semibold opacity-90">{model.disc.title}</span>{/if}
+<div class="flex h-screen flex-col">
+  <header class="flex items-center gap-2.5 border-b border-primary-border/15 bg-surface px-2 py-1.5 dark:bg-surface-dark">
+    <FileMenu
+      scanning={scanning}
+      canSave={!!project}
+      onOpenFolder={() => openAndScan('folder')}
+      onOpenZip={() => openAndScan('zip')}
+      onOpenIso={() => (showIso = true)}
+      onOpenProject={pickAndOpen}
+      onSaveProject={saveProject}
+    />
+    <span class="ml-auto text-xs opacity-70">{progress}</span>
+  </header>
+
   {#if project}
-    <button class="rounded bg-primary px-3 py-1 font-semibold text-on-primary hover:bg-primary-hover disabled:opacity-50" onclick={() => (showBuild = true)} disabled={!canBuild}>Build...</button>
+    <div class="flex items-center gap-2.5 border-b border-primary-border/15 bg-surface px-2 py-1 dark:bg-surface-dark">
+      {#if model?.disc.title}<span class="text-sm font-semibold opacity-90">{model.disc.title}</span>{/if}
+      <button class="rounded bg-primary px-3 py-1 font-semibold text-on-primary hover:bg-primary-hover disabled:opacity-50" onclick={() => (showBuild = true)} disabled={!canBuild}>Build...</button>
+    </div>
   {/if}
-  <span class="ml-auto text-xs opacity-70">{progress}</span>
-</header>
+
+  {#if encrypted}
+    <div class="shrink-0 border-b border-amber-600 bg-amber-900/40 p-2 text-xs">
+      Most clips are unreadable - this image may be AACS-encrypted or not decrypted.
+    </div>
+  {/if}
+
+  {#if !model && !project}
+    <div class="min-h-0 flex-1"><WelcomeCard /></div>
+  {:else}
+    <div class="flex min-h-0 flex-1 flex-col">
+      <main class="grid min-h-0 flex-1 grid-cols-[220px_1fr_300px] gap-2.5 p-2.5">
+        <section class="flex flex-col overflow-hidden">
+          <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Clips</h3>
+          <ClipLibrary clips={lib} chapters={clipChapters} selectedId={selected?.kind === 'clip' ? selected.id : undefined} onselect={(id) => (selected = { kind: 'clip', id })} />
+        </section>
+        <section class="flex flex-col overflow-hidden">
+          <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Editions</h3>
+          {#if project}
+            <EditionTracks
+              {project} {shared} {clipInfo}
+              onselect={(id) => (selected = { kind: 'clip', id })}
+              onappend={(i, id) => apply((p) => appendClip(p, i, id))}
+              onremove={(i, k) => apply((p) => removeClip(p, i, k))}
+              onrename={(i, name) => apply((p) => renameEdition(p, i, name))}
+              onadd={() => apply((p) => addEdition(p, `Edition ${p.editions.length + 1}`))}
+              ondelete={(i) => apply((p) => removeEdition(p, i))}
+            />
+          {/if}
+        </section>
+        <section class="flex flex-col overflow-hidden">
+          <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Playlists</h3>
+          <PlaylistPicker
+            {rows} chapters={playlistChapters}
+            selectedFile={selected?.kind === 'playlist' ? selected.id : undefined}
+            onselect={(file) => (selected = { kind: 'playlist', id: file })}
+            onimport={(file) => { const pl = model?.playlists.find((p) => p.file === file); if (pl) apply((p) => importPlaylist(p, pl)) }}
+          />
+        </section>
+      </main>
+      <div class="h-40 shrink-0">
+        <DetailPanel {model} {selected} />
+      </div>
+    </div>
+  {/if}
+</div>
 
 {#if showBuild && project}
   <BuildModal {project} onclose={() => (showBuild = false)} />
@@ -107,49 +157,4 @@
 
 {#if showIso}
   <IsoHelpModal onclose={() => (showIso = false)} />
-{/if}
-
-{#if encrypted}
-  <div class="border-b border-amber-600 bg-amber-900/40 p-2 text-xs">
-    Most clips are unreadable - this image may be AACS-encrypted or not decrypted.
-  </div>
-{/if}
-
-{#if !model && !project}
-  <div class="h-[calc(100vh-52px)]"><WelcomeCard /></div>
-{:else}
-  <div class="flex h-[calc(100vh-52px)] flex-col">
-    <main class="grid min-h-0 flex-1 grid-cols-[220px_1fr_300px] gap-2.5 p-2.5">
-      <section class="flex flex-col overflow-hidden">
-        <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Clips</h3>
-        <ClipLibrary clips={lib} chapters={clipChapters} selectedId={selected?.kind === 'clip' ? selected.id : undefined} onselect={(id) => (selected = { kind: 'clip', id })} />
-      </section>
-      <section class="flex flex-col overflow-hidden">
-        <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Editions</h3>
-        {#if project}
-          <EditionTracks
-            {project} {shared} {clipInfo}
-            onselect={(id) => (selected = { kind: 'clip', id })}
-            onappend={(i, id) => apply((p) => appendClip(p, i, id))}
-            onremove={(i, k) => apply((p) => removeClip(p, i, k))}
-            onrename={(i, name) => apply((p) => renameEdition(p, i, name))}
-            onadd={() => apply((p) => addEdition(p, `Edition ${p.editions.length + 1}`))}
-            ondelete={(i) => apply((p) => removeEdition(p, i))}
-          />
-        {/if}
-      </section>
-      <section class="flex flex-col overflow-hidden">
-        <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Playlists</h3>
-        <PlaylistPicker
-          {rows} chapters={playlistChapters}
-          selectedFile={selected?.kind === 'playlist' ? selected.id : undefined}
-          onselect={(file) => (selected = { kind: 'playlist', id: file })}
-          onimport={(file) => { const pl = model?.playlists.find((p) => p.file === file); if (pl) apply((p) => importPlaylist(p, pl)) }}
-        />
-      </section>
-    </main>
-    <div class="h-40 shrink-0">
-      <DetailPanel {model} {selected} />
-    </div>
-  </div>
 {/if}
