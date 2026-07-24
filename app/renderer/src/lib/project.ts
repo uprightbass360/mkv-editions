@@ -65,6 +65,18 @@ export function hasBuildableEdition(p: Project): boolean {
   return p.editions.some((e) => e.clips.length > 0)
 }
 
+export function canStartBuild(s: {
+  folder: string | null
+  buildable: boolean
+  running: boolean
+  inspected: boolean
+  existingCount: number
+  overwrite: boolean
+}): boolean {
+  return !!s.folder && s.buildable && !s.running && s.inspected &&
+    (s.existingCount === 0 || s.overwrite)
+}
+
 export function fromMkvedproj(json: any): Project {
   if (json?.version !== 1) throw new Error('unsupported project version ' + json?.version)
   for (const k of ['bdmv', 'title', 'mode', 'editions']) {

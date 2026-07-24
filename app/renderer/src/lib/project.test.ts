@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   newProject, addEdition, appendClip, moveClip, removeClip, importPlaylist,
-  sharedClipIds, toMkvedproj, fromMkvedproj, hasBuildableEdition,
+  sharedClipIds, toMkvedproj, fromMkvedproj, hasBuildableEdition, canStartBuild,
 } from './project'
 
 describe('edition ops are immutable and correct', () => {
@@ -69,5 +69,22 @@ describe('hasBuildableEdition', () => {
   it('is true once an edition has a clip', () => {
     const p = appendClip(addEdition(newProject('/x'), 'A'), 0, '00001')
     expect(hasBuildableEdition(p)).toBe(true)
+  })
+})
+
+describe('canStartBuild', () => {
+  const base = { folder: '/out', buildable: true, running: false, inspected: true, existingCount: 0, overwrite: false }
+  it('is true when folder set, buildable, inspected, no collisions, not running', () => {
+    expect(canStartBuild(base)).toBe(true)
+  })
+  it('is false without a folder, when not buildable, while running, or before inspect', () => {
+    expect(canStartBuild({ ...base, folder: null })).toBe(false)
+    expect(canStartBuild({ ...base, buildable: false })).toBe(false)
+    expect(canStartBuild({ ...base, running: true })).toBe(false)
+    expect(canStartBuild({ ...base, inspected: false })).toBe(false)
+  })
+  it('requires overwrite when there are collisions', () => {
+    expect(canStartBuild({ ...base, existingCount: 2, overwrite: false })).toBe(false)
+    expect(canStartBuild({ ...base, existingCount: 2, overwrite: true })).toBe(true)
   })
 })
