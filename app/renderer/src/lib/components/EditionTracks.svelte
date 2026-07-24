@@ -2,13 +2,14 @@
   import type { Project } from '$lib/project'
   import type { LibraryClip } from '$lib/model'
   import { fmtDuration } from '$lib/model'
-  let { project, shared, clipInfo = {}, onappend, onremove, onrename, onadd }: {
+  let { project, shared, clipInfo = {}, onappend, onremove, onrename, onadd, onselect }: {
     project: Project; shared: Set<string>
     clipInfo?: Record<string, LibraryClip>
     onappend: (editionIdx: number, clipId: string) => void
     onremove: (editionIdx: number, clipIdx: number) => void
     onrename: (editionIdx: number, name: string) => void
     onadd: () => void
+    onselect?: (clipId: string) => void
   } = $props()
 
   function onDrop(e: DragEvent, i: number) {
@@ -32,13 +33,16 @@
         {#each ed.clips as c, k (k)}
           {@const info = clipInfo[c]}
           <!-- width is proportional to clip duration (a longer clip runs visibly longer); min-width keeps short clips readable -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
           <div
             class="flex flex-col justify-between overflow-hidden rounded border p-1 text-xs {shared.has(c) ? 'border-primary bg-primary/15' : 'border-primary-border/20 bg-page dark:bg-page-dark'}"
             style="flex-grow: {info?.durNs ?? 1}; flex-basis: 0; min-width: 3.5rem"
+            onclick={() => onselect?.(c)}
           >
             <div class="flex items-start justify-between gap-1">
               <span class="font-medium">{c}</span>
-              <button class="leading-none opacity-50 hover:opacity-100" title="remove" onclick={() => onremove(i, k)}>x</button>
+              <button class="leading-none opacity-50 hover:opacity-100" title="remove" onclick={(e) => { e.stopPropagation(); onremove(i, k) }}>x</button>
             </div>
             {#if info}
               <div class="mt-1 opacity-70">{fmtDuration(info.durNs)}</div>
