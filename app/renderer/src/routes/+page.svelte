@@ -10,7 +10,7 @@
   import { libraryClips, playlistRows, longestRealPlaylist, unreadableRatio, chapterCount, type DiscModel } from '$lib/model'
   import {
     newProject, addEdition, appendClip, removeClip, renameEdition, removeEdition, importPlaylist,
-    sharedClipIds, toMkvedproj, fromMkvedproj, hasBuildableEdition, type Project,
+    sharedClipIds, toMkvedproj, fromMkvedproj, hasBuildableEdition, toggleSlot, type Project,
   } from '$lib/project'
 
   let model = $state<DiscModel | null>(null)
@@ -145,7 +145,9 @@
         </section>
       </main>
       <div class="h-40 shrink-0">
-        <DetailPanel {model} {selected} />
+        <DetailPanel {model} {selected} {project}
+          ontoggleslot={(slot) => apply((p) => toggleSlot(p, slot, model ? model.slots.map((s) => s.id) : []))}
+        />
       </div>
     </div>
   {/if}

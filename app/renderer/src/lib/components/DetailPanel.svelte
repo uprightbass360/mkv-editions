@@ -1,14 +1,19 @@
 <script lang="ts">
   import type { DiscModel } from '$lib/model'
-  import { chapterCount, fmtResolution, clipStreamSummary, playlistRows, fmtDuration } from '$lib/model'
-  let { model, selected }: {
+  import type { Project } from '$lib/project'
+  import { chapterCount, fmtResolution, fmtChannels, playlistRows, fmtDuration } from '$lib/model'
+  import { isSlotKept, keptSummary, missingKeptSlots } from '$lib/project'
+  let { model, selected, project, ontoggleslot }: {
     model: DiscModel | null
     selected: { kind: 'clip' | 'playlist'; id: string } | null
+    project: Project | null
+    ontoggleslot?: (slot: string) => void
   } = $props()
 
   let clip = $derived(
     model && selected?.kind === 'clip' ? model.clips[selected.id] : null,
   )
+  let allSlotIds = $derived(model ? model.slots.map((s) => s.id) : [])
   let plRow = $derived(
     model && selected?.kind === 'playlist'
       ? playlistRows(model).find((r) => r.file === selected.id)
@@ -35,9 +40,25 @@
       {#if clip.tracks.length === 0}
         <div class="text-red-400">unreadable</div>
       {:else}
-        {#each clipStreamSummary(clip) as line}
-          <div class="opacity-80">{line}</div>
+        {#if project}
+          {@const sum = keptSummary(project, allSlotIds)}
+          <div class="opacity-60">{sum.all ? 'Keeping all tracks' : `Keeping ${sum.kept} of ${sum.total} tracks - applies to every clip`}</div>
+        {/if}
+        {#each clip.streams.filter((s) => s.kind !== 'video') as s}
+          <div class="flex items-center gap-2">
+            {#if s.slot && project}
+              <!-- svelte-ignore a11y_label_has_associated_control -->
+              <input type="checkbox" checked={isSlotKept(project, s.slot)} onchange={() => ontoggleslot?.(s.slot as string)} />
+            {/if}
+            <span class="opacity-80 {s.slot && project && !isSlotKept(project, s.slot) ? 'line-through opacity-40' : ''}">{s.kind} {s.codec}{s.lang ? ' ' + s.lang : ''}{s.kind === 'audio' && s.channels ? ' ' + fmtChannels(s.channels) : ''}</span>
+          </div>
         {/each}
+        {#if model && project}
+          {@const miss = missingKeptSlots(model, project)}
+          {#if miss.length}
+            <div class="mt-1 text-amber-400">{miss.length} kept track(s) missing from some clips - build fails in flat/xin1: {miss.map((x) => x.slot).join(', ')}</div>
+          {/if}
+        {/if}
       {/if}
     </div>
     <div class="mt-1 opacity-50">{clip.path}</div>
