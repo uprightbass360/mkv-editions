@@ -127,3 +127,17 @@ def test_scan_disc_meta_unreadable_xml_yields_nulls(tmp_path, ge):
     dl.mkdir(parents=True)
     (dl / "bdmt_eng.xml").mkdir()
     assert ge.disc_meta(str(bd)) == {"title": None, "poster": None}
+
+
+def test_scan_streams_have_slot_ids(sample_bd):
+    doc = json.loads(run_cli([str(sample_bd), "--scan-json", "--fast"]).stdout)
+    streams = doc["clips"]["00001"]["streams"]
+    ids = {sl["id"] for sl in doc["slots"]}
+    saw_av = False
+    for s in streams:
+        if s["kind"] in ("audio", "subtitle"):
+            saw_av = True
+            assert isinstance(s["slot"], str) and s["slot"] in ids
+        else:
+            assert s["slot"] is None
+    assert saw_av

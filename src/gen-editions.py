@@ -919,6 +919,12 @@ def streams_with_channels(streams, chans):
     return out
 
 
+def streams_with_slots(streams):
+    """Return copies of the streams with the slot id attached (None for
+    video/unknown kinds), using the same ids as compute_slots."""
+    return [dict(s, slot=sid) for sid, s in slot_ids_for_clip(streams)]
+
+
 def disc_meta(bdmv):
     """Disc title (from BDMV/META/DL/bdmt_*.xml, eng preferred) and the largest
     image in META/DL as a poster path. Any failure yields nulls (real discs
@@ -971,7 +977,8 @@ def run_scan(args):
                     "codec": p["codec"], "exact": p["frames"] is not None,
                     "width": p["width"], "height": p["height"],
                     "marks_ns": cmarks.get(c, []),
-                    "streams": streams_with_channels(cstreams.get(c, []), p["audio_channels"]),
+                    "streams": streams_with_slots(
+                        streams_with_channels(cstreams.get(c, []), p["audio_channels"])),
                     "tracks": p["tracks"]}
     bad = sorted(c for c, d in clips.items() if d["codec"] == "vc1")
     if bad:
