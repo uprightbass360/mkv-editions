@@ -4,7 +4,10 @@ export interface Stream {
   codec: string
   lang: string | null
   channels?: number | null
+  slot?: string | null
 }
+
+export interface TrackSel { slot: string; keep: boolean; lang?: string; default?: boolean }
 
 export interface ClipTrack {
   tid: number
