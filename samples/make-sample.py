@@ -152,6 +152,17 @@ def main(out_dir=None):
     write_mpls(os.path.join(playlist, "00003.mpls"), ANGLED, durs, langmap)
     write_mpls(os.path.join(playlist, "00004.mpls"), MISMATCH, durs, langmap)
 
+    meta = os.path.join(out_dir, "BDMV", "META", "DL")
+    os.makedirs(meta)
+    open(os.path.join(meta, "bdmt_eng.xml"), "w").write(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<disclib xmlns:di="urn:BDA:bdmv;discinfo">\n'
+        '  <di:discinfo><di:title><di:name>Sample Disc</di:name></di:title></di:discinfo>\n'
+        '</disclib>\n')
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+                    "-i", "color=c=teal:s=200x300:d=1", "-frames:v", "1",
+                    os.path.join(meta, "poster.jpg")], check=True)
+
     def slot_str(s):
         return s if isinstance(s, str) else "[" + "|".join(s) + "]"
 

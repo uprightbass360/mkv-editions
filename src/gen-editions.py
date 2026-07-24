@@ -42,6 +42,7 @@ Requires mkvmerge (+ ffprobe) on PATH. MPLS PlayItem/PlayListMark tables are
 parsed directly (no libbluray/mpls_dump needed); MPLS timestamps are 45 kHz.
 """
 
+import glob as _glob
 import hashlib
 import json
 import os
@@ -50,6 +51,7 @@ import sys
 import shlex
 import subprocess
 import tempfile
+import xml.etree.ElementTree as _ET
 from collections import namedtuple
 from xml.sax.saxutils import escape as xml_escape
 
@@ -917,6 +919,31 @@ def streams_with_channels(streams, chans):
     return out
 
 
+def disc_meta(bdmv):
+    """Disc title (from BDMV/META/DL/bdmt_*.xml, eng preferred) and the largest
+    image in META/DL as a poster path. Any failure yields nulls (real discs
+    often lack META)."""
+    meta = os.path.join(bdmv, "META", "DL")
+    title = None
+    xmls = sorted(_glob.glob(os.path.join(meta, "bdmt_*.xml")))
+    xmls.sort(key=lambda p: 0 if p.endswith("bdmt_eng.xml") else 1)
+    for xp in xmls:
+        try:
+            root = _ET.parse(xp).getroot()
+            for el in root.iter():
+                if el.tag.rsplit("}", 1)[-1] == "name" and (el.text or "").strip():
+                    title = el.text.strip()
+                    break
+            if title:
+                break
+        except _ET.ParseError:
+            continue
+    imgs = [p for p in _glob.glob(os.path.join(meta, "*"))
+            if p.lower().endswith((".jpg", ".jpeg", ".png"))]
+    poster = max(imgs, key=os.path.getsize) if imgs else None
+    return {"title": title, "poster": os.path.abspath(poster) if poster else None}
+
+
 def run_scan(args):
     bdmv = args.bdmv
     playlists, cmarks, cstreams, warns = sweep_playlists(bdmv)
@@ -953,6 +980,7 @@ def run_scan(args):
                       "playlists": playlists,
                       "slots": compute_slots(
                           {c: clips[c]["streams"] for c in clips}),
+                      "disc": disc_meta(bdmv),
                       "warnings": warns}, indent=2))
 
 

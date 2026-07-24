@@ -101,3 +101,18 @@ def test_scan_has_resolution_and_channels(sample_bd):
     assert c["width"] == 1280 and c["height"] == 720
     auds = [s for s in c["streams"] if s["kind"] == "audio"]
     assert auds and all(s["channels"] == 2 for s in auds)
+
+
+def test_scan_has_disc_meta(sample_bd):
+    doc = json.loads(run_cli([str(sample_bd), "--scan-json", "--fast"]).stdout)
+    assert doc["disc"]["title"] == "Sample Disc"
+    assert doc["disc"]["poster"] and doc["disc"]["poster"].endswith(".jpg")
+
+
+def test_scan_disc_meta_absent(tmp_path, ge):
+    # a BDMV with a PLAYLIST but no META -> nulls, no crash
+    import os
+    bd = tmp_path / "BDMV"
+    (bd / "PLAYLIST").mkdir(parents=True)
+    (bd / "STREAM").mkdir()
+    assert ge.disc_meta(str(bd)) == {"title": None, "poster": None}
