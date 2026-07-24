@@ -6,6 +6,7 @@
   import BuildModal from '$lib/components/BuildModal.svelte'
   import FileMenu from '$lib/components/FileMenu.svelte'
   import IsoHelpModal from '$lib/components/IsoHelpModal.svelte'
+  import WelcomeCard from '$lib/components/WelcomeCard.svelte'
   import { libraryClips, playlistRows, longestRealPlaylist, unreadableRatio, chapterCount, type DiscModel } from '$lib/model'
   import {
     newProject, addEdition, appendClip, removeClip, renameEdition, removeEdition, importPlaylist,
@@ -114,37 +115,41 @@
   </div>
 {/if}
 
-<div class="flex h-[calc(100vh-52px)] flex-col">
-  <main class="grid min-h-0 flex-1 grid-cols-[220px_1fr_300px] gap-2.5 p-2.5">
-    <section class="flex flex-col overflow-hidden">
-      <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Clips</h3>
-      <ClipLibrary clips={lib} chapters={clipChapters} selectedId={selected?.kind === 'clip' ? selected.id : undefined} onselect={(id) => (selected = { kind: 'clip', id })} />
-    </section>
-    <section class="flex flex-col overflow-hidden">
-      <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Editions</h3>
-      {#if project}
-        <EditionTracks
-          {project} {shared} {clipInfo}
-          onselect={(id) => (selected = { kind: 'clip', id })}
-          onappend={(i, id) => apply((p) => appendClip(p, i, id))}
-          onremove={(i, k) => apply((p) => removeClip(p, i, k))}
-          onrename={(i, name) => apply((p) => renameEdition(p, i, name))}
-          onadd={() => apply((p) => addEdition(p, `Edition ${p.editions.length + 1}`))}
-          ondelete={(i) => apply((p) => removeEdition(p, i))}
+{#if !model && !project}
+  <div class="h-[calc(100vh-52px)]"><WelcomeCard /></div>
+{:else}
+  <div class="flex h-[calc(100vh-52px)] flex-col">
+    <main class="grid min-h-0 flex-1 grid-cols-[220px_1fr_300px] gap-2.5 p-2.5">
+      <section class="flex flex-col overflow-hidden">
+        <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Clips</h3>
+        <ClipLibrary clips={lib} chapters={clipChapters} selectedId={selected?.kind === 'clip' ? selected.id : undefined} onselect={(id) => (selected = { kind: 'clip', id })} />
+      </section>
+      <section class="flex flex-col overflow-hidden">
+        <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Editions</h3>
+        {#if project}
+          <EditionTracks
+            {project} {shared} {clipInfo}
+            onselect={(id) => (selected = { kind: 'clip', id })}
+            onappend={(i, id) => apply((p) => appendClip(p, i, id))}
+            onremove={(i, k) => apply((p) => removeClip(p, i, k))}
+            onrename={(i, name) => apply((p) => renameEdition(p, i, name))}
+            onadd={() => apply((p) => addEdition(p, `Edition ${p.editions.length + 1}`))}
+            ondelete={(i) => apply((p) => removeEdition(p, i))}
+          />
+        {/if}
+      </section>
+      <section class="flex flex-col overflow-hidden">
+        <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Playlists</h3>
+        <PlaylistPicker
+          {rows} chapters={playlistChapters}
+          selectedFile={selected?.kind === 'playlist' ? selected.id : undefined}
+          onselect={(file) => (selected = { kind: 'playlist', id: file })}
+          onimport={(file) => { const pl = model?.playlists.find((p) => p.file === file); if (pl) apply((p) => importPlaylist(p, pl)) }}
         />
-      {/if}
-    </section>
-    <section class="flex flex-col overflow-hidden">
-      <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Playlists</h3>
-      <PlaylistPicker
-        {rows} chapters={playlistChapters}
-        selectedFile={selected?.kind === 'playlist' ? selected.id : undefined}
-        onselect={(file) => (selected = { kind: 'playlist', id: file })}
-        onimport={(file) => { const pl = model?.playlists.find((p) => p.file === file); if (pl) apply((p) => importPlaylist(p, pl)) }}
-      />
-    </section>
-  </main>
-  <div class="h-40 shrink-0">
-    <DetailPanel {model} {selected} />
+      </section>
+    </main>
+    <div class="h-40 shrink-0">
+      <DetailPanel {model} {selected} />
+    </div>
   </div>
-</div>
+{/if}
