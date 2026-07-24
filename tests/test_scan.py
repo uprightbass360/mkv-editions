@@ -91,3 +91,13 @@ def test_build_without_fast_still_writes_qpfile(sample_bd, tmp_path):
     assert r.returncode == 0, r.stderr
     assert (out / "S.T.qpfile.txt").read_text().startswith("96 I\n")
     assert "qpfile(s) written" in r.stdout
+
+
+def test_scan_has_resolution_and_channels(sample_bd):
+    r = run_cli([str(sample_bd), "--scan-json", "--fast"])
+    assert r.returncode == 0, r.stderr
+    doc = json.loads(r.stdout)
+    c = doc["clips"]["00001"]
+    assert c["width"] == 1280 and c["height"] == 720
+    auds = [s for s in c["streams"] if s["kind"] == "audio"]
+    assert auds and all(s["channels"] == 2 for s in auds)
