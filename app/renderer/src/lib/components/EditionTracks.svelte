@@ -1,7 +1,10 @@
 <script lang="ts">
   import type { Project } from '$lib/project'
-  let { project, shared, onappend, onremove, onrename, onadd }: {
+  import type { LibraryClip } from '$lib/model'
+  import { fmtDuration } from '$lib/model'
+  let { project, shared, clipInfo = {}, onappend, onremove, onrename, onadd }: {
     project: Project; shared: Set<string>
+    clipInfo?: Record<string, LibraryClip>
     onappend: (editionIdx: number, clipId: string) => void
     onremove: (editionIdx: number, clipIdx: number) => void
     onrename: (editionIdx: number, name: string) => void
@@ -20,20 +23,35 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       data-edition
-      class="rounded-md border border-dashed border-slate-600 p-1.5"
+      class="rounded-md border border-dashed border-primary-border/30 bg-surface p-1.5 dark:bg-surface-dark"
       ondrop={(e) => onDrop(e, i)}
       ondragover={(e) => e.preventDefault()}
     >
-      <input class="mb-1 bg-transparent font-semibold" value={ed.name} onchange={(e) => onrename(i, (e.target as HTMLInputElement).value)} />
-      <div class="flex min-h-6 flex-wrap gap-1">
+      <input class="mb-1 w-full bg-transparent font-semibold" value={ed.name} onchange={(e) => onrename(i, (e.target as HTMLInputElement).value)} />
+      <div class="flex min-h-20 items-stretch gap-1 overflow-x-auto">
         {#each ed.clips as c, k (k)}
-          <span class="rounded border px-1 text-xs {shared.has(c) ? 'border-indigo-400 bg-indigo-500/20' : 'border-slate-600'}">
-            {c}
-            <button class="opacity-60" onclick={() => onremove(i, k)}>x</button>
-          </span>
+          {@const info = clipInfo[c]}
+          <!-- width is proportional to clip duration (a longer clip runs visibly longer); min-width keeps short clips readable -->
+          <div
+            class="flex flex-col justify-between overflow-hidden rounded border p-1 text-xs {shared.has(c) ? 'border-primary bg-primary/15' : 'border-primary-border/20 bg-page dark:bg-page-dark'}"
+            style="flex-grow: {info?.durNs ?? 1}; flex-basis: 0; min-width: 3.5rem"
+          >
+            <div class="flex items-start justify-between gap-1">
+              <span class="font-medium">{c}</span>
+              <button class="leading-none opacity-50 hover:opacity-100" title="remove" onclick={() => onremove(i, k)}>x</button>
+            </div>
+            {#if info}
+              <div class="mt-1 opacity-70">{fmtDuration(info.durNs)}</div>
+              {#if info.readable}
+                <div class="opacity-70">{info.audioCount}a {info.subCount}s</div>
+              {:else}
+                <div class="text-red-400">unreadable</div>
+              {/if}
+            {/if}
+          </div>
         {/each}
       </div>
     </div>
   {/each}
-  <button class="self-start rounded bg-slate-700 px-2 py-1 text-sm" onclick={() => onadd()}>+ new edition</button>
+  <button class="self-start rounded border border-primary-border/25 px-2 py-1 text-sm hover:bg-primary/10" onclick={() => onadd()}>+ new edition</button>
 </div>

@@ -60,29 +60,30 @@
   function apply(fn: (p: Project) => Project) { if (project) project = fn(project) }
 
   let lib = $derived(model ? libraryClips(model) : [])
+  let clipInfo = $derived(Object.fromEntries(lib.map((c) => [c.id, c])))
   let rows = $derived(model ? playlistRows(model) : [])
   let shared = $derived(project ? sharedClipIds(project) : new Set<string>())
   let encrypted = $derived(model ? unreadableRatio(model) > 0.5 : false)
 </script>
 
-<header class="flex items-center gap-2.5 border-b border-slate-700 p-2">
-  <button class="rounded bg-indigo-600 px-3 py-1" onclick={() => openAndScan('folder')} disabled={scanning}>Open folder...</button>
-  <button class="rounded bg-indigo-600 px-3 py-1" onclick={() => openAndScan('zip')} disabled={scanning}>Open ZIP...</button>
-  <button class="rounded bg-slate-700 px-2 py-1" onclick={() => (showIso = !showIso)}>Open ISO...</button>
-  <button class="rounded bg-slate-700 px-2 py-1" onclick={pickAndOpen}>Open project...</button>
+<header class="flex items-center gap-2.5 border-b border-primary-border/15 bg-surface px-2 py-1.5 dark:bg-surface-dark">
+  <button class="rounded bg-primary px-3 py-1 font-semibold text-on-primary hover:bg-primary-hover disabled:opacity-50" onclick={() => openAndScan('folder')} disabled={scanning}>Open folder...</button>
+  <button class="rounded bg-primary px-3 py-1 font-semibold text-on-primary hover:bg-primary-hover disabled:opacity-50" onclick={() => openAndScan('zip')} disabled={scanning}>Open ZIP...</button>
+  <button class="rounded border border-primary-border/25 px-2 py-1 hover:bg-primary/10" onclick={() => (showIso = !showIso)}>Open ISO...</button>
+  <button class="rounded border border-primary-border/25 px-2 py-1 hover:bg-primary/10" onclick={pickAndOpen}>Open project...</button>
   {#if project}
-    <input class="bg-slate-800 px-1" bind:value={project.title} />
-    <select class="bg-slate-800" bind:value={project.mode}>
+    <input class="rounded border border-primary-border/25 bg-surface px-1 dark:bg-surface-dark" bind:value={project.title} />
+    <select class="rounded border border-primary-border/25 bg-surface px-1 dark:bg-surface-dark" bind:value={project.mode}>
       <option value="flat">flat</option><option value="linked">linked</option><option value="xin1">xin1</option>
     </select>
-    <label><input type="checkbox" bind:checked={project.preserve_chapters} /> preserve chapters</label>
-    <button class="rounded bg-slate-700 px-2 py-1" onclick={async () => { if (project) await window.api.saveProject(toMkvedproj(project), project.title) }}>Save project...</button>
+    <label class="text-sm"><input type="checkbox" bind:checked={project.preserve_chapters} /> preserve chapters</label>
+    <button class="rounded border border-primary-border/25 px-2 py-1 hover:bg-primary/10" onclick={async () => { if (project) await window.api.saveProject(toMkvedproj(project), project.title) }}>Save project...</button>
   {/if}
   <span class="ml-auto text-xs opacity-70">{progress}</span>
 </header>
 
 {#if showIso}
-  <div class="border-b border-slate-700 bg-slate-800 p-2 text-xs">
+  <div class="border-b border-primary-border/15 bg-surface p-2 text-xs dark:bg-surface-dark">
     <p>Mount the ISO first, then use "Open folder..." on the mount point:</p>
     <pre class="mt-1 whitespace-pre-wrap">sudo mount -o loop,ro your-disc.iso /mnt/disc
 # or rootless (Linux desktop):
@@ -97,12 +98,12 @@ udisksctl loop-setup -f your-disc.iso</pre>
 {/if}
 
 <main class="grid h-[calc(100vh-52px)] grid-cols-[220px_1fr_300px] gap-2.5 p-2.5">
-  <section class="flex flex-col overflow-hidden"><h3 class="mb-1.5 text-sm">Clips</h3><ClipLibrary clips={lib} /></section>
+  <section class="flex flex-col overflow-hidden"><h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Clips</h3><ClipLibrary clips={lib} /></section>
   <section class="flex flex-col overflow-hidden">
-    <h3 class="mb-1.5 text-sm">Editions</h3>
+    <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Editions</h3>
     {#if project}
       <EditionTracks
-        {project} {shared}
+        {project} {shared} {clipInfo}
         onappend={(i, id) => apply((p) => appendClip(p, i, id))}
         onremove={(i, k) => apply((p) => removeClip(p, i, k))}
         onrename={(i, name) => apply((p) => renameEdition(p, i, name))}
@@ -111,7 +112,7 @@ udisksctl loop-setup -f your-disc.iso</pre>
     {/if}
   </section>
   <section class="flex flex-col overflow-hidden">
-    <h3 class="mb-1.5 text-sm">Playlists</h3>
+    <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Playlists</h3>
     <PlaylistPicker {rows} onimport={(file) => {
       const pl = model?.playlists.find((p) => p.file === file)
       if (pl) apply((p) => importPlaylist(p, pl))

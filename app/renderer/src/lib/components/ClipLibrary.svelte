@@ -11,7 +11,7 @@
   {#each clips as c (c.id)}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="flex gap-2 rounded border border-slate-600 px-1.5 py-1 text-xs {c.readable ? 'cursor-grab' : 'cursor-not-allowed opacity-50'}"
+      class="flex gap-2 rounded border border-primary-border/20 bg-surface px-1.5 py-1 text-xs dark:bg-surface-dark {c.readable ? 'cursor-grab hover:border-primary/60' : 'cursor-not-allowed opacity-50'}"
       draggable={c.readable}
       ondragstart={(e) => onDragStart(e, c.id)}
     >
