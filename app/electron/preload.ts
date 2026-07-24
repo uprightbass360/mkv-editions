@@ -8,7 +8,12 @@ const api = {
     ipcRenderer.on('scan:progress', h)
     return () => ipcRenderer.removeListener('scan:progress', h)
   },
-  pickBdmv: (): Promise<string | null> => ipcRenderer.invoke('pickBdmv'),
+  openInput: (kind: 'folder' | 'zip') => ipcRenderer.invoke('openInput', kind),
+  onExtractProgress: (cb: (p: { percent: number }) => void) => {
+    const h = (_e: unknown, p: any) => cb(p)
+    ipcRenderer.on('extract:progress', h)
+    return () => ipcRenderer.removeListener('extract:progress', h)
+  },
   saveProject: (json: unknown, title: string) => ipcRenderer.invoke('saveProject', json, title),
   openProject: () => ipcRenderer.invoke('openProject')
 }

@@ -14,11 +14,15 @@ declare global {
   type SaveProjectResult = { ok: true; path: string } | { ok: false; error: string }
   type OpenProjectResult = { ok: true; json: unknown } | { ok: false; error: string }
 
+  type OpenInputResult = { ok: true; bdmvPath: string } | { ok: false; error: string }
+  interface ExtractProgress { percent: number }
+
   interface ElectronApi {
     ping: () => Promise<string>
     scanDisc: (bdmv: string) => Promise<ScanResult>
     onScanProgress: (cb: (p: ScanProgress) => void) => () => void
-    pickBdmv: () => Promise<string | null>
+    openInput: (kind: 'folder' | 'zip') => Promise<OpenInputResult | null>
+    onExtractProgress: (cb: (p: ExtractProgress) => void) => () => void
     saveProject: (json: unknown, title: string) => Promise<SaveProjectResult>
     openProject: () => Promise<OpenProjectResult | null>
   }

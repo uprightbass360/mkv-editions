@@ -240,6 +240,18 @@ ordered `<EditionEntry>` per playlist whose atoms seek within the file itself (n
 `mpv Fellowship.mkv --edition=0|1` - mpv even shows the edition names here, since
 no segment linking is involved. Any other player sees the raw concatenation.
 
+### Input formats (Electron app)
+
+The Electron workbench accepts three input shapes: a ripped-disc folder
+(containing `BDMV/`), a ZIP archive of one, or a pre-mounted ISO - mount it
+first, then point "Open folder..." at the mount:
+
+    udisksctl loop-setup -f your-disc.iso
+
+If the resulting scan comes back mostly "unreadable" clips (over half with
+zero decodable tracks), the image is probably still AACS-encrypted or was
+never decrypted - re-rip it with MakeMKV in Backup mode first.
+
 ### Options (after [Xin1Generator](https://code.google.com/archive/p/xin1generator))
 
 - **`--preserve-chapters`** - reads the disc's chapter marks from the `.mpls`
