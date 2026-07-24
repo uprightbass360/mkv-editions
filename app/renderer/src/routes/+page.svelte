@@ -4,6 +4,7 @@
   import EditionTracks from '$lib/components/EditionTracks.svelte'
   import DetailPanel from '$lib/components/DetailPanel.svelte'
   import BuildModal from '$lib/components/BuildModal.svelte'
+  import FileMenu from '$lib/components/FileMenu.svelte'
   import { libraryClips, playlistRows, longestRealPlaylist, unreadableRatio, chapterCount, type DiscModel } from '$lib/model'
   import {
     newProject, addEdition, appendClip, removeClip, renameEdition, removeEdition, importPlaylist,
@@ -63,6 +64,10 @@
     }
   }
 
+  async function saveProject() {
+    if (project) await window.api.saveProject(toMkvedproj(project), project.title)
+  }
+
   function apply(fn: (p: Project) => Project) { if (project) project = fn(project) }
 
   let canBuild = $derived(!!project && hasBuildableEdition(project))
@@ -78,18 +83,17 @@
 </script>
 
 <header class="flex items-center gap-2.5 border-b border-primary-border/15 bg-surface px-2 py-1.5 dark:bg-surface-dark">
-  <button class="rounded bg-primary px-3 py-1 font-semibold text-on-primary hover:bg-primary-hover disabled:opacity-50" onclick={() => openAndScan('folder')} disabled={scanning}>Open folder...</button>
-  <button class="rounded bg-primary px-3 py-1 font-semibold text-on-primary hover:bg-primary-hover disabled:opacity-50" onclick={() => openAndScan('zip')} disabled={scanning}>Open ZIP...</button>
-  <button class="rounded border border-primary-border/25 px-2 py-1 hover:bg-primary/10" onclick={() => (showIso = !showIso)}>Open ISO...</button>
-  <button class="rounded border border-primary-border/25 px-2 py-1 hover:bg-primary/10" onclick={pickAndOpen}>Open project...</button>
+  <FileMenu
+    scanning={scanning}
+    canSave={!!project}
+    onOpenFolder={() => openAndScan('folder')}
+    onOpenZip={() => openAndScan('zip')}
+    onOpenIso={() => (showIso = !showIso)}
+    onOpenProject={pickAndOpen}
+    onSaveProject={saveProject}
+  />
   {#if model?.disc.title}<span class="text-sm font-semibold opacity-90">{model.disc.title}</span>{/if}
   {#if project}
-    <input class="rounded border border-primary-border/25 bg-surface px-1 dark:bg-surface-dark" bind:value={project.title} />
-    <select class="rounded border border-primary-border/25 bg-surface px-1 dark:bg-surface-dark" bind:value={project.mode}>
-      <option value="flat">flat</option><option value="linked">linked</option><option value="xin1">xin1</option>
-    </select>
-    <label class="text-sm"><input type="checkbox" bind:checked={project.preserve_chapters} /> preserve chapters</label>
-    <button class="rounded border border-primary-border/25 px-2 py-1 hover:bg-primary/10" onclick={async () => { if (project) await window.api.saveProject(toMkvedproj(project), project.title) }}>Save project...</button>
     <button class="rounded bg-primary px-3 py-1 font-semibold text-on-primary hover:bg-primary-hover disabled:opacity-50" onclick={() => (showBuild = true)} disabled={!canBuild}>Build...</button>
   {/if}
   <span class="ml-auto text-xs opacity-70">{progress}</span>
