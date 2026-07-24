@@ -5,6 +5,7 @@
   import DetailPanel from '$lib/components/DetailPanel.svelte'
   import BuildModal from '$lib/components/BuildModal.svelte'
   import FileMenu from '$lib/components/FileMenu.svelte'
+  import IsoHelpModal from '$lib/components/IsoHelpModal.svelte'
   import { libraryClips, playlistRows, longestRealPlaylist, unreadableRatio, chapterCount, type DiscModel } from '$lib/model'
   import {
     newProject, addEdition, appendClip, removeClip, renameEdition, removeEdition, importPlaylist,
@@ -88,7 +89,7 @@
     canSave={!!project}
     onOpenFolder={() => openAndScan('folder')}
     onOpenZip={() => openAndScan('zip')}
-    onOpenIso={() => (showIso = !showIso)}
+    onOpenIso={() => (showIso = true)}
     onOpenProject={pickAndOpen}
     onSaveProject={saveProject}
   />
@@ -104,12 +105,7 @@
 {/if}
 
 {#if showIso}
-  <div class="border-b border-primary-border/15 bg-surface p-2 text-xs dark:bg-surface-dark">
-    <p>Mount the ISO first, then use "Open folder..." on the mount point:</p>
-    <pre class="mt-1 whitespace-pre-wrap">sudo mount -o loop,ro your-disc.iso /mnt/disc
-# or rootless (Linux desktop):
-udisksctl loop-setup -f your-disc.iso</pre>
-  </div>
+  <IsoHelpModal onclose={() => (showIso = false)} />
 {/if}
 
 {#if encrypted}
