@@ -1,0 +1,16 @@
+import { contextBridge, ipcRenderer } from 'electron'
+
+const api = {
+  ping: (): Promise<string> => ipcRenderer.invoke('ping'),
+  scanDisc: (bdmv: string) => ipcRenderer.invoke('scan', bdmv),
+  onScanProgress: (cb: (p: { clip: string; done: number; total: number }) => void) => {
+    const h = (_e: unknown, p: any) => cb(p)
+    ipcRenderer.on('scan:progress', h)
+    return () => ipcRenderer.removeListener('scan:progress', h)
+  },
+  pickBdmv: (): Promise<string | null> => ipcRenderer.invoke('pickBdmv'),
+  saveProject: (json: unknown, title: string) => ipcRenderer.invoke('saveProject', json, title),
+  openProject: () => ipcRenderer.invoke('openProject')
+}
+
+contextBridge.exposeInMainWorld('api', api)

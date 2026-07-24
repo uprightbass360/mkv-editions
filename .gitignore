@@ -14,3 +14,14 @@ pytest-of-*/
 
 # test discs (large; never commit)
 *.iso
+
+# repo-root probe cache from manual --cache runs
+cache/
+
+# electron/sveltekit app build artifacts
+app/node_modules/
+app/dist-electron/
+app/renderer/build/
+app/renderer/.svelte-kit/
+# vite/vitest write a cache dir here even though deps hoist to app/node_modules/
+app/renderer/node_modules/
