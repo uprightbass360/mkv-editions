@@ -936,11 +936,14 @@ def disc_meta(bdmv):
                     break
             if title:
                 break
-        except _ET.ParseError:
+        except (_ET.ParseError, OSError):
             continue
     imgs = [p for p in _glob.glob(os.path.join(meta, "*"))
             if p.lower().endswith((".jpg", ".jpeg", ".png"))]
-    poster = max(imgs, key=os.path.getsize) if imgs else None
+    try:
+        poster = max(imgs, key=os.path.getsize) if imgs else None
+    except OSError:
+        poster = None
     return {"title": title, "poster": os.path.abspath(poster) if poster else None}
 
 

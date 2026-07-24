@@ -116,3 +116,14 @@ def test_scan_disc_meta_absent(tmp_path, ge):
     (bd / "PLAYLIST").mkdir(parents=True)
     (bd / "STREAM").mkdir()
     assert ge.disc_meta(str(bd)) == {"title": None, "poster": None}
+
+
+def test_scan_disc_meta_unreadable_xml_yields_nulls(tmp_path, ge):
+    # bdmt_eng.xml is a DIRECTORY, not a file: _ET.parse raises IsADirectoryError
+    # (an OSError, not a ParseError). disc_meta must not crash: it skips the
+    # bad file and returns nulls, same as no META at all.
+    bd = tmp_path / "BDMV"
+    dl = bd / "META" / "DL"
+    dl.mkdir(parents=True)
+    (dl / "bdmt_eng.xml").mkdir()
+    assert ge.disc_meta(str(bd)) == {"title": None, "poster": None}
