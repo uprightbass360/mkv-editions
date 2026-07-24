@@ -1,6 +1,7 @@
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, statSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
+import { tmpdir } from 'node:os'
 
 /** True if dir/PLAYLIST holds at least one .mpls file. */
 function hasPlaylist(dir: string): boolean {
@@ -101,4 +102,47 @@ export function extractZip(
       resolve(destDir)
     })
   })
+}
+
+export type OpenInputResult =
+  | { ok: true; bdmvPath: string }
+  | { ok: false; error: string }
+export type Selection = { kind: 'folder' | 'zip'; path: string }
+
+const extractedDirs = new Set<string>()
+
+export function cleanupExtractions(): void {
+  for (const d of extractedDirs) {
+    try { rmSync(d, { recursive: true, force: true }) } catch { /* best effort */ }
+  }
+  extractedDirs.clear()
+}
+
+/** Route a user selection (folder or zip) to a BDMV path. */
+export async function resolveInput(
+  sel: Selection,
+  onProgress: (p: ExtractProgress) => void,
+  deps: { detect?: () => string | null } = {},
+): Promise<OpenInputResult> {
+  if (sel.kind === 'folder') {
+    const bdmv = findBdmv(sel.path)
+    return bdmv
+      ? { ok: true, bdmvPath: bdmv }
+      : { ok: false, error: `No BDMV/PLAYLIST found under ${sel.path}` }
+  }
+  const tool = (deps.detect ?? detectZipTool)()
+  if (!tool) return { ok: false, error: 'No zip tool found - install 7z (p7zip) or unzip' }
+  const dest = mkdtempSync(join(tmpdir(), 'mkved-zip-'))
+  extractedDirs.add(dest)
+  try {
+    await extractZip(sel.path, dest, onProgress, tool)
+  } catch (e) {
+    try { rmSync(dest, { recursive: true, force: true }) } catch { /* ignore */ }
+    extractedDirs.delete(dest)
+    return { ok: false, error: String((e as Error).message || e) }
+  }
+  const bdmv = findBdmv(dest)
+  return bdmv
+    ? { ok: true, bdmvPath: bdmv }
+    : { ok: false, error: `No BDMV/PLAYLIST found in the extracted archive` }
 }
