@@ -2,7 +2,7 @@
   import type { Project } from '$lib/project'
   import type { LibraryClip } from '$lib/model'
   import { fmtDuration } from '$lib/model'
-  let { project, shared, clipInfo = {}, onappend, onremove, onrename, onadd, onselect }: {
+  let { project, shared, clipInfo = {}, onappend, onremove, onrename, onadd, onselect, ondelete }: {
     project: Project; shared: Set<string>
     clipInfo?: Record<string, LibraryClip>
     onappend: (editionIdx: number, clipId: string) => void
@@ -10,6 +10,7 @@
     onrename: (editionIdx: number, name: string) => void
     onadd: () => void
     onselect?: (clipId: string) => void
+    ondelete?: (editionIdx: number) => void
   } = $props()
 
   function onDrop(e: DragEvent, i: number) {
@@ -28,7 +29,10 @@
       ondrop={(e) => onDrop(e, i)}
       ondragover={(e) => e.preventDefault()}
     >
-      <input class="mb-1 w-full bg-transparent font-semibold" value={ed.name} onchange={(e) => onrename(i, (e.target as HTMLInputElement).value)} />
+      <div class="mb-1 flex items-center gap-1">
+        <input class="w-full bg-transparent font-semibold" value={ed.name} onchange={(e) => onrename(i, (e.target as HTMLInputElement).value)} />
+        <button class="leading-none opacity-50 hover:opacity-100" title="delete edition" onclick={(e) => { e.stopPropagation(); ondelete?.(i) }}>x</button>
+      </div>
       <div class="flex min-h-20 items-stretch gap-1 overflow-x-auto">
         {#each ed.clips as c, k (k)}
           {@const info = clipInfo[c]}

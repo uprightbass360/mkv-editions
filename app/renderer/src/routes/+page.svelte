@@ -5,7 +5,7 @@
   import DetailPanel from '$lib/components/DetailPanel.svelte'
   import { libraryClips, playlistRows, longestRealPlaylist, unreadableRatio, chapterCount, type DiscModel } from '$lib/model'
   import {
-    newProject, addEdition, appendClip, removeClip, renameEdition, importPlaylist,
+    newProject, addEdition, appendClip, removeClip, renameEdition, removeEdition, importPlaylist,
     sharedClipIds, toMkvedproj, fromMkvedproj, type Project,
   } from '$lib/project'
 
@@ -122,6 +122,7 @@ udisksctl loop-setup -f your-disc.iso</pre>
           onremove={(i, k) => apply((p) => removeClip(p, i, k))}
           onrename={(i, name) => apply((p) => renameEdition(p, i, name))}
           onadd={() => apply((p) => addEdition(p, `Edition ${p.editions.length + 1}`))}
+          ondelete={(i) => apply((p) => removeEdition(p, i))}
         />
       {/if}
     </section>
