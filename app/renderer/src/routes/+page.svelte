@@ -13,11 +13,9 @@
   let progress = $state('')
   let scanning = $state(false)
 
-  async function pickAndScan() {
-    const bdmv = await window.api.pickBdmv()
-    if (!bdmv) return
-    scanning = true
-    progress = 'scanning...'
+  let showIso = $state(false)
+
+  async function scanInto(bdmv: string) {
     let off: (() => void) | undefined
     try {
       off = window.api.onScanProgress((p) => { progress = `probing ${p.clip} (${p.done}/${p.total})` })
@@ -32,10 +30,21 @@
         progress = `scan complete - suggested feature ${feat}`
       } else progress = 'scan complete'
       project = p
-    } finally {
-      off?.()
-      scanning = false
-    }
+    } finally { off?.() }
+  }
+
+  async function openAndScan(kind: 'folder' | 'zip') {
+    scanning = true
+    progress = kind === 'zip' ? 'extracting...' : 'opening...'
+    let offX: (() => void) | undefined
+    try {
+      if (kind === 'zip') offX = window.api.onExtractProgress((p) => { progress = `extracting ${p.percent}%` })
+      const res = await window.api.openInput(kind)
+      if (!res) { progress = ''; return }
+      if (!res.ok) { progress = 'open failed: ' + res.error; return }
+      offX?.(); offX = undefined
+      await scanInto(res.bdmvPath)
+    } finally { offX?.(); scanning = false }
   }
 
   async function pickAndOpen() {
@@ -56,7 +65,9 @@
 </script>
 
 <header class="flex items-center gap-2.5 border-b border-slate-700 p-2">
-  <button class="rounded bg-indigo-600 px-3 py-1" onclick={pickAndScan} disabled={scanning}>Open BDMV...</button>
+  <button class="rounded bg-indigo-600 px-3 py-1" onclick={() => openAndScan('folder')} disabled={scanning}>Open folder...</button>
+  <button class="rounded bg-indigo-600 px-3 py-1" onclick={() => openAndScan('zip')} disabled={scanning}>Open ZIP...</button>
+  <button class="rounded bg-slate-700 px-2 py-1" onclick={() => (showIso = !showIso)}>Open ISO...</button>
   <button class="rounded bg-slate-700 px-2 py-1" onclick={pickAndOpen}>Open project...</button>
   {#if project}
     <input class="bg-slate-800 px-1" bind:value={project.title} />
@@ -68,6 +79,15 @@
   {/if}
   <span class="ml-auto text-xs opacity-70">{progress}</span>
 </header>
+
+{#if showIso}
+  <div class="border-b border-slate-700 bg-slate-800 p-2 text-xs">
+    <p>Mount the ISO first, then use "Open folder..." on the mount point:</p>
+    <pre class="mt-1 whitespace-pre-wrap">sudo mount -o loop,ro your-disc.iso /mnt/disc
+# or rootless (Linux desktop):
+udisksctl loop-setup -f your-disc.iso</pre>
+  </div>
+{/if}
 
 <main class="grid h-[calc(100vh-52px)] grid-cols-[220px_1fr_300px] gap-2.5 p-2.5">
   <section class="flex flex-col overflow-hidden"><h3 class="mb-1.5 text-sm">Clips</h3><ClipLibrary clips={lib} /></section>
