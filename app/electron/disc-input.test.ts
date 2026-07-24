@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { findBdmv } from './disc-input'
+import { findBdmv, detectZipTool, extractZip } from './disc-input'
 
 function mkPlaylist(dir: string) {
   mkdirSync(join(dir, 'PLAYLIST'), { recursive: true })
@@ -30,4 +31,29 @@ describe('findBdmv', () => {
     mkdirSync(join(root, 'PLAYLIST'), { recursive: true }) // empty, no .mpls
     expect(findBdmv(root)).toBe(null)
   })
+})
+
+describe('detectZipTool', () => {
+  it('returns null when PATH has none of the tools', () => {
+    expect(detectZipTool('/nonexistent-dir')).toBe(null)
+  })
+})
+
+describe('extractZip', () => {
+  const tool = detectZipTool()
+  const canZip = tool === '7z' || tool === '7za'
+  it.runIf(canZip)('extracts a zip so findBdmv can locate the BDMV, and fires progress', async () => {
+    const work = mkdtempSync(join(tmpdir(), 'ez-'))
+    // build a source tree with a BDMV/PLAYLIST/*.mpls
+    mkPlaylist(join(work, 'src', 'BDMV'))
+    const zip = join(work, 'disc.zip')
+    execFileSync(tool as string, ['a', zip, join(work, 'src')], { stdio: 'ignore' })
+    const dest = mkdtempSync(join(tmpdir(), 'ez-out-'))
+    const pcts: number[] = []
+    const out = await extractZip(zip, dest, (p) => pcts.push(p.percent), tool as string)
+    expect(out).toBe(dest)
+    expect(findBdmv(dest)).not.toBe(null)
+    expect(pcts[0]).toBe(0)
+    expect(pcts[pcts.length - 1]).toBe(100)
+  }, 30_000)
 })
