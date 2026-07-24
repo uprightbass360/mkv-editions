@@ -45,4 +45,16 @@ describe('EditionTracks', () => {
     await fireEvent.click(btns[1])
     expect(ondelete).toHaveBeenCalledWith(1)
   })
+
+  it('reorders within an edition when a move payload is dropped on a card', async () => {
+    const p = appendClip(appendClip(addEdition(newProject('/x'), 'E'), 0, 'AAA'), 0, 'BBB')
+    const onmove = vi.fn()
+    render(EditionTracks, {
+      project: p, shared: new Set<string>(),
+      onappend: () => {}, onremove: () => {}, onrename: () => {}, onadd: () => {}, onmove,
+    })
+    const cardA = screen.getByText('AAA').closest('[draggable]') as HTMLElement
+    await fireEvent.drop(cardA, { dataTransfer: { getData: () => 'move:0:1' } })
+    expect(onmove).toHaveBeenCalledWith(0, 1, 0)
+  })
 })

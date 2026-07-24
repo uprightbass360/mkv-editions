@@ -10,7 +10,7 @@
   import { libraryClips, playlistRows, longestRealPlaylist, unreadableRatio, chapterCount, type DiscModel } from '$lib/model'
   import {
     newProject, addEdition, appendClip, removeClip, renameEdition, removeEdition, importPlaylist,
-    sharedClipIds, toMkvedproj, fromMkvedproj, hasBuildableEdition, toggleSlot, type Project,
+    sharedClipIds, toMkvedproj, fromMkvedproj, hasBuildableEdition, toggleSlot, moveClip, type Project,
   } from '$lib/project'
 
   let model = $state<DiscModel | null>(null)
@@ -131,6 +131,7 @@
               onrename={(i, name) => apply((p) => renameEdition(p, i, name))}
               onadd={() => apply((p) => addEdition(p, `Edition ${p.editions.length + 1}`))}
               ondelete={(i) => apply((p) => removeEdition(p, i))}
+              onmove={(i, from, to) => apply((p) => moveClip(p, i, from, to))}
             />
           {/if}
         </section>
