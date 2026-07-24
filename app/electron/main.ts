@@ -4,6 +4,7 @@ import path from 'node:path'
 import { scanDisc } from './scan'
 import { writeProjectFile, readProjectFile } from './project-io'
 import { createOpener, cleanupExtractions } from './disc-input'
+import { createBuilder } from './build'
 
 // Built to CJS by tsup, so __dirname is available natively at runtime.
 const dirname = __dirname
@@ -67,6 +68,23 @@ ipcMain.handle('openProject', async () => {
   try { return { ok: true, json: await readProjectFile(r.filePaths[0]) } }
   catch (e) { return { ok: false, error: String(e) } }
 })
+
+const builder = createBuilder({
+  showOpenDialog: (opts) => dialog.showOpenDialog(opts),
+  confirmOverwrite: async (names) => {
+    const r = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Overwrite', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      message: 'Overwrite existing file(s)?',
+      detail: names.join('\n'),
+    })
+    return r.response === 0
+  },
+})
+ipcMain.handle('buildProject', async (event, json: unknown) =>
+  builder.buildProject(json, (p) => event.sender.send('build:progress', p)))
 
 function createWindow() {
   const win = new BrowserWindow({
