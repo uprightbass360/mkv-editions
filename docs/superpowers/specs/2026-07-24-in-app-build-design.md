@@ -66,9 +66,10 @@ that invokes mkvmerge; the app never constructs mkvmerge arguments itself.
    cancel happens before any work, the overwrite cancel after generation.)
 7. On confirm (or no collisions) main spawns `bash <outdir>/build.sh` with cwd
    `<outdir>`, parsing mkvmerge `Progress: NN%` lines and emitting
-   `build-progress` events `{ percent, name }` where `name` is the current
-   output file. Reuses the `feedPercents` percent-parser from the ZIP-extract
-   path (no re-emission bug).
+   `build:progress` events `{ percent }` (overall mkvmerge percent; per-output
+   attribution is not reliable from the aggregate `bash build.sh` stdout).
+   Reuses the `feedPercents` percent-parser from the ZIP-extract path (no
+   re-emission bug).
 8. Success -> `{ ok: true, outputs: [<absolute mkv paths>] }`. Failure of
    `build.sh` / mkvmerge -> `{ ok: false, error: <stderr tail> }`. The temp
    `.mkvedproj` is removed in a `finally` in every path.
@@ -86,7 +87,7 @@ that invokes mkvmerge; the app never constructs mkvmerge arguments itself.
   targets from the generated `build.sh` so the overwrite check and the returned
   `outputs` are exact (not re-derived from title/mode).
 - Progress: a small stdout line-buffer feeding `feedPercents`; emits on the
-  `build-progress` channel to the focused window.
+  `build:progress` channel to the focused window.
 - All spawns use argument arrays (no shell string interpolation) except the
   intentional `bash build.sh` invocation, whose contents are the hardened
   generated script.
