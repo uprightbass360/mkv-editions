@@ -111,6 +111,22 @@ returns `{ok, bdmvPath}` or `{ok:false, error}`, plus `extract:progress` events
 during a ZIP extraction. On success the renderer calls the existing
 `window.api.scanDisc(bdmvPath)` - the Increment-1 flow, unchanged.
 
+### Reaching root-level mounts in the open dialog
+
+The native folder dialog starts under the user's home and only surfaces
+Home/Desktop/app shortcuts, so the filesystem root - and therefore `/mnt` and
+`/media`, where ISO mounts and external media live - is hard to reach. Both open
+dialogs (folder and ZIP) set `defaultPath` so root is immediately browsable:
+
+- First open of a session: `defaultPath` is the filesystem root `/` (so `/mnt`,
+  `/media`, and every top-level dir are visible at once).
+- Subsequent opens: `defaultPath` is the directory of the last successfully
+  opened input, so the user resumes near where they were (typically `/mnt/...`).
+
+Last-used is remembered in the main process for the session. Cross-session
+persistence (a settings store) is out of scope for this increment; the root
+default already solves "I cannot get to `/mnt`".
+
 ## Data flow
 
 1. User clicks an entry point.
@@ -157,6 +173,9 @@ during a ZIP extraction. On success the renderer calls the existing
 - **Missing-tool path** - `resolveInput({kind:'zip'})` returns the dep error when
   the tool check is injected as absent.
 - **ISO guidance** - one assertion that the help text contains the mount command.
+- **Open-dialog defaultPath** - the folder/ZIP open handler uses `/` on the first
+  call and the last successfully opened directory thereafter (assert the
+  `showOpenDialog` options via an injected dialog stub).
 
 ## Validation
 
