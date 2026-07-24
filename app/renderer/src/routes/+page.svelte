@@ -73,6 +73,8 @@
       if (!res) { progress = ''; return }
       if (!res.ok) { progress = res.error === 'cancelled' ? '' : 'build failed: ' + res.error; return }
       progress = `built ${res.outputs.length} file(s)`
+    } catch (e) {
+      progress = 'build failed: ' + String((e as Error).message || e)
     } finally { off?.(); building = false }
   }
 

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { resolveCli } from './cli'
 import { feedPercents } from './disc-input'
@@ -72,9 +72,10 @@ export async function runBuild(
   const sp = deps.spawnFn ?? spawn
   let cli
   try { cli = resolveCli() } catch (e) { return { ok: false, error: String((e as Error).message || e) } }
-  const tmpDir = mkdtempSync(join(tmpdir(), 'mkved-build-'))
-  const tmpProject = join(tmpDir, 'project.mkvedproj')
+  let tmpDir: string | undefined
   try {
+    tmpDir = mkdtempSync(join(tmpdir(), 'mkved-build-'))
+    const tmpProject = join(tmpDir, 'project.mkvedproj')
     writeFileSync(tmpProject, JSON.stringify(json))
     // Step 1: generate build.sh (+ aux files) into outdir. No MKV yet.
     const gen = await spawnOnce(sp, cli.python, [cli.script, '--project', tmpProject, outdir], undefined)
@@ -94,8 +95,10 @@ export async function runBuild(
     })
     if (build.code !== 0) return { ok: false, error: build.err.trim() || `build exited ${build.code}` }
     return { ok: true, outputs: names.map((n) => join(outdir, n)) }
+  } catch (e) {
+    return { ok: false, error: String((e as Error).message || e) }
   } finally {
-    try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* best effort */ }
+    if (tmpDir) { try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* best effort */ } }
   }
 }
 
