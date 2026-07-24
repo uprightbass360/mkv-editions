@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { libraryClips, playlistRows, longestRealPlaylist, fmtDuration, type DiscModel } from './model'
+import { unreadableRatio } from './model'
 
 const NS = 1_000_000_000
 function clip(dur: number, tracks = 1, aud = 1, sub = 0) {
@@ -58,5 +59,19 @@ describe('longestRealPlaylist', () => {
 describe('fmtDuration', () => {
   it('formats H:MM:SS', () => {
     expect(fmtDuration(9600 * NS)).toBe('2:40:00')
+  })
+})
+
+describe('unreadableRatio', () => {
+  it('is high when most clips have zero tracks', () => {
+    const m: any = { clips: {
+      a: { tracks: [] }, b: { tracks: [] }, c: { tracks: [{ tid: 0, type: 'video', pid: 1 }] },
+    } }
+    expect(unreadableRatio(m)).toBeCloseTo(2 / 3)
+    expect(unreadableRatio(m) > 0.5).toBe(true)
+  })
+  it('is 0 for a healthy disc and 0 for no clips', () => {
+    expect(unreadableRatio({ clips: { a: { tracks: [{ tid: 0, type: 'video', pid: 1 }] } } } as any)).toBe(0)
+    expect(unreadableRatio({ clips: {} } as any)).toBe(0)
   })
 })

@@ -2,7 +2,7 @@
   import ClipLibrary from '$lib/components/ClipLibrary.svelte'
   import PlaylistPicker from '$lib/components/PlaylistPicker.svelte'
   import EditionTracks from '$lib/components/EditionTracks.svelte'
-  import { libraryClips, playlistRows, longestRealPlaylist, type DiscModel } from '$lib/model'
+  import { libraryClips, playlistRows, longestRealPlaylist, unreadableRatio, type DiscModel } from '$lib/model'
   import {
     newProject, addEdition, appendClip, removeClip, renameEdition, importPlaylist,
     sharedClipIds, toMkvedproj, fromMkvedproj, type Project,
@@ -62,6 +62,7 @@
   let lib = $derived(model ? libraryClips(model) : [])
   let rows = $derived(model ? playlistRows(model) : [])
   let shared = $derived(project ? sharedClipIds(project) : new Set<string>())
+  let encrypted = $derived(model ? unreadableRatio(model) > 0.5 : false)
 </script>
 
 <header class="flex items-center gap-2.5 border-b border-slate-700 p-2">
@@ -86,6 +87,12 @@
     <pre class="mt-1 whitespace-pre-wrap">sudo mount -o loop,ro your-disc.iso /mnt/disc
 # or rootless (Linux desktop):
 udisksctl loop-setup -f your-disc.iso</pre>
+  </div>
+{/if}
+
+{#if encrypted}
+  <div class="border-b border-amber-600 bg-amber-900/40 p-2 text-xs">
+    Most clips are unreadable - this image may be AACS-encrypted or not decrypted.
   </div>
 {/if}
 

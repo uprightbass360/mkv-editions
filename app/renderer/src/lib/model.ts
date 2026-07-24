@@ -94,3 +94,11 @@ export function fmtDuration(ns: number): string {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60
   return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
 }
+
+/** Fraction of clips with zero decodable tracks (a symptom of an encrypted image). */
+export function unreadableRatio(m: DiscModel): number {
+  const ids = Object.keys(m.clips)
+  if (ids.length === 0) return 0
+  const bad = ids.filter((id) => m.clips[id].tracks.length === 0).length
+  return bad / ids.length
+}
