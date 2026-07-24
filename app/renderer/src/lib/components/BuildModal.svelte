@@ -1,0 +1,110 @@
+<script lang="ts">
+  import type { Project } from '$lib/project'
+  import { toMkvedproj, hasBuildableEdition, canStartBuild } from '$lib/project'
+
+  let { project, onclose }: { project: Project; onclose: () => void } = $props()
+
+  let folder = $state<string | null>(null)
+  let outputs = $state<string[]>([])
+  let existing = $state<string[]>([])
+  let inspected = $state(false)
+  let inspectError = $state('')
+  let overwrite = $state(false)
+  let running = $state(false)
+  let percent = $state(0)
+  let log = $state('')
+  let result = $state('')
+
+  let buildable = $derived(hasBuildableEdition(project))
+  let startable = $derived(
+    canStartBuild({ folder, buildable, running, inspected, existingCount: existing.length, overwrite }),
+  )
+
+  async function inspect() {
+    if (!folder) return
+    inspected = false
+    inspectError = ''
+    const res = await window.api.buildInspect(toMkvedproj(project), folder)
+    if (!res.ok) { inspectError = res.error; outputs = []; existing = []; return }
+    outputs = res.outputs
+    existing = res.existing
+    inspected = true
+  }
+
+  async function choose() {
+    const f = await window.api.buildPickFolder()
+    if (!f) return
+    folder = f
+    overwrite = false
+    await inspect()
+  }
+
+  // Re-inspect when a filename-affecting setting changes while a folder is set.
+  function onSettingChange() { if (folder) inspect() }
+
+  async function start() {
+    if (!folder) return
+    running = true
+    result = ''
+    log = ''
+    percent = 0
+    let offP: (() => void) | undefined
+    let offL: (() => void) | undefined
+    try {
+      offP = window.api.onBuildProgress((p) => { percent = p.percent })
+      offL = window.api.onBuildLog((p) => { log += p.line + '\n' })
+      const res = await window.api.buildRun(toMkvedproj(project), folder, overwrite)
+      result = res.ok ? `Built ${res.outputs.length} file(s) in ${folder}` : 'Build failed: ' + res.error
+    } catch (e) {
+      result = 'Build failed: ' + String((e as Error).message || e)
+    } finally { offP?.(); offL?.(); running = false }
+  }
+</script>
+
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+  <div class="flex max-h-[90vh] w-[560px] flex-col gap-3 overflow-auto rounded-lg border border-primary-border/30 bg-surface p-4 text-sm dark:bg-surface-dark">
+    <div class="flex items-center justify-between">
+      <h2 class="text-base font-semibold">Build movie</h2>
+      <button class="opacity-60 hover:opacity-100" title="close" onclick={onclose} disabled={running}>x</button>
+    </div>
+
+    <label class="flex items-center gap-2">Output name
+      <input class="flex-1 rounded border border-primary-border/25 bg-page px-1 dark:bg-page-dark" bind:value={project.title} oninput={onSettingChange} />
+    </label>
+    <label class="flex items-center gap-2">Mode
+      <select class="rounded border border-primary-border/25 bg-page px-1 dark:bg-page-dark" bind:value={project.mode} onchange={onSettingChange}>
+        <option value="flat">flat</option><option value="linked">linked</option><option value="xin1">xin1</option>
+      </select>
+    </label>
+    <label class="flex items-center gap-2"><input type="checkbox" bind:checked={project.preserve_chapters} /> preserve chapters</label>
+    <label class="flex items-center gap-2"><input type="checkbox" bind:checked={project.qpfile} /> qpfile</label>
+
+    <div class="flex items-center gap-2">
+      <span class="truncate opacity-80">{folder ?? 'No output folder chosen'}</span>
+      <button class="ml-auto rounded border border-primary-border/25 px-2 py-0.5 hover:bg-primary/10" onclick={choose} disabled={running}>Choose...</button>
+    </div>
+
+    {#if inspectError}
+      <div class="text-red-400">{inspectError}</div>
+    {:else if inspected}
+      <div class="opacity-80">Will write {outputs.length} file(s): {outputs.join(', ')}</div>
+      {#if existing.length}
+        <div class="text-amber-400">{existing.length} file(s) will be overwritten: {existing.join(', ')}</div>
+        <label class="flex items-center gap-2"><input type="checkbox" bind:checked={overwrite} /> Overwrite existing files</label>
+      {/if}
+    {/if}
+
+    {#if running || result || log}
+      <div class="h-2 w-full overflow-hidden rounded bg-page dark:bg-page-dark">
+        <div class="h-full bg-primary" style="width: {percent}%"></div>
+      </div>
+      <pre class="h-40 overflow-auto rounded border border-primary-border/20 bg-page p-1 text-xs dark:bg-page-dark">{log}</pre>
+      {#if result}<div class="font-medium">{result}</div>{/if}
+    {/if}
+
+    <div class="mt-1 flex justify-end gap-2">
+      <button class="rounded bg-primary px-3 py-1 font-semibold text-on-primary hover:bg-primary-hover disabled:opacity-50" onclick={start} disabled={!startable}>Start</button>
+      <button class="rounded border border-primary-border/25 px-3 py-1 hover:bg-primary/10 disabled:opacity-50" onclick={onclose} disabled={running}>Close</button>
+    </div>
+  </div>
+</div>
