@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   newProject, addEdition, appendClip, moveClip, removeClip, importPlaylist,
-  sharedClipIds, toMkvedproj, fromMkvedproj,
+  sharedClipIds, toMkvedproj, fromMkvedproj, hasBuildableEdition,
 } from './project'
 
 describe('edition ops are immutable and correct', () => {
@@ -58,5 +58,16 @@ describe('mkvedproj serialization round-trips', () => {
 
   it('rejects editions that are not an array', () => {
     expect(() => fromMkvedproj({ version: 1, bdmv: 'x', title: 't', mode: 'flat', editions: 'nope' })).toThrow(/array/)
+  })
+})
+
+describe('hasBuildableEdition', () => {
+  it('is false with no editions or only empty editions', () => {
+    expect(hasBuildableEdition(newProject('/x'))).toBe(false)
+    expect(hasBuildableEdition(addEdition(newProject('/x'), 'A'))).toBe(false)
+  })
+  it('is true once an edition has a clip', () => {
+    const p = appendClip(addEdition(newProject('/x'), 'A'), 0, '00001')
+    expect(hasBuildableEdition(p)).toBe(true)
   })
 })

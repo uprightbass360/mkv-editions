@@ -6,13 +6,14 @@
   import { libraryClips, playlistRows, longestRealPlaylist, unreadableRatio, chapterCount, type DiscModel } from '$lib/model'
   import {
     newProject, addEdition, appendClip, removeClip, renameEdition, removeEdition, importPlaylist,
-    sharedClipIds, toMkvedproj, fromMkvedproj, type Project,
+    sharedClipIds, toMkvedproj, fromMkvedproj, hasBuildableEdition, type Project,
   } from '$lib/project'
 
   let model = $state<DiscModel | null>(null)
   let project = $state<Project | null>(null)
   let progress = $state('')
   let scanning = $state(false)
+  let building = $state(false)
 
   let showIso = $state(false)
 
@@ -61,8 +62,23 @@
     }
   }
 
+  async function buildMovie() {
+    if (!project) return
+    building = true
+    progress = 'building...'
+    let off: (() => void) | undefined
+    try {
+      off = window.api.onBuildProgress((p) => { progress = `building ${p.percent}%` })
+      const res = await window.api.buildProject(toMkvedproj(project))
+      if (!res) { progress = ''; return }
+      if (!res.ok) { progress = res.error === 'cancelled' ? '' : 'build failed: ' + res.error; return }
+      progress = `built ${res.outputs.length} file(s)`
+    } finally { off?.(); building = false }
+  }
+
   function apply(fn: (p: Project) => Project) { if (project) project = fn(project) }
 
+  let canBuild = $derived(!!project && hasBuildableEdition(project))
   let lib = $derived(model ? libraryClips(model) : [])
   let clipInfo = $derived(Object.fromEntries(lib.map((c) => [c.id, c])))
   let rows = $derived(model ? playlistRows(model) : [])
@@ -87,6 +103,7 @@
     </select>
     <label class="text-sm"><input type="checkbox" bind:checked={project.preserve_chapters} /> preserve chapters</label>
     <button class="rounded border border-primary-border/25 px-2 py-1 hover:bg-primary/10" onclick={async () => { if (project) await window.api.saveProject(toMkvedproj(project), project.title) }}>Save project...</button>
+    <button class="rounded bg-primary px-3 py-1 font-semibold text-on-primary hover:bg-primary-hover disabled:opacity-50" onclick={buildMovie} disabled={!canBuild || building}>Build...</button>
   {/if}
   <span class="ml-auto text-xs opacity-70">{progress}</span>
 </header>

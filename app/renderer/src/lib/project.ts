@@ -61,6 +61,10 @@ export function toMkvedproj(p: Project): object {
     tracks: [],
   }
 }
+export function hasBuildableEdition(p: Project): boolean {
+  return p.editions.some((e) => e.clips.length > 0)
+}
+
 export function fromMkvedproj(json: any): Project {
   if (json?.version !== 1) throw new Error('unsupported project version ' + json?.version)
   for (const k of ['bdmv', 'title', 'mode', 'editions']) {
