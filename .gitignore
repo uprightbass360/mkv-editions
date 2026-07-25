@@ -19,6 +19,11 @@ pytest-of-*/
 
 # leaked test-fixture temp dirs (test runs / sandbox wrote these to the repo root)
 /mkved-sample-*/
+/mkved-out-*/
+/mkved-realout-*/
+/mkved-cache-*/
+/mkved-build-*/
+/mkved-inspect-*/
 /ez-*/
 /fb-*/
 /ri-*/
