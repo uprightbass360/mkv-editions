@@ -95,7 +95,10 @@ export async function inspectBuild(
     const genDir = join(tmpDir, 'gen')
     mkdirSync(genDir)
     writeFileSync(tmpProject, JSON.stringify(json))
-    const gen = await spawnOnce(sp, cli.python, [cli.script, '--project', tmpProject, genDir], undefined)
+    // --fast: inspect only needs the output filenames from build.sh, never
+    // frame-accurate probing. Without it, gen-editions frame-counts every real
+    // m2ts end-to-end (minutes on a mounted disc) and the modal hangs.
+    const gen = await spawnOnce(sp, cli.python, [cli.script, '--project', tmpProject, genDir, '--fast'], undefined)
     if (gen.code !== 0) return { ok: false, error: gen.err.trim() || `gen-editions exited ${gen.code}` }
     let names: string[]
     try { names = expectedOutputs(readFileSync(join(genDir, 'build.sh'), 'utf8')) }
@@ -127,7 +130,11 @@ export async function runBuild(
     tmpDir = mkdtempSync(join(tmpdir(), 'mkved-build-'))
     const tmpProject = join(tmpDir, 'project.mkvedproj')
     writeFileSync(tmpProject, JSON.stringify(json))
-    const gen = await spawnOnce(sp, cli.python, [cli.script, '--project', tmpProject, outdir], undefined)
+    // Frame counting is only needed for qpfile (IDR at clip joins); otherwise
+    // --fast keeps the build from re-reading every clip end-to-end.
+    const genArgs = [cli.script, '--project', tmpProject, outdir]
+    if (!(json as { qpfile?: boolean } | null | undefined)?.qpfile) genArgs.push('--fast')
+    const gen = await spawnOnce(sp, cli.python, genArgs, undefined)
     if (gen.code !== 0) return { ok: false, error: gen.err.trim() || `gen-editions exited ${gen.code}` }
     let names: string[]
     try { names = expectedOutputs(readFileSync(join(outdir, 'build.sh'), 'utf8')) }

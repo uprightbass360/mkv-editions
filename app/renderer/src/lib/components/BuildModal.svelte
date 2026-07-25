@@ -12,6 +12,7 @@
   let outputs = $state<string[]>([])
   let existing = $state<string[]>([])
   let inspected = $state(false)
+  let inspecting = $state(false)
   let inspectError = $state('')
   let overwrite = $state(false)
   let running = $state(false)
@@ -26,6 +27,7 @@
 
   async function inspect() {
     if (!folder) return
+    inspecting = true
     inspected = false
     inspectError = ''
     try {
@@ -39,6 +41,8 @@
       inspectError = 'inspect failed: ' + String((e as Error).message || e)
       outputs = []
       existing = []
+    } finally {
+      inspecting = false
     }
   }
 
@@ -98,7 +102,9 @@
       <button class="ml-auto rounded border border-primary-border/25 px-2 py-0.5 hover:bg-primary/10" onclick={choose} disabled={running}>Choose...</button>
     </div>
 
-    {#if inspectError}
+    {#if inspecting}
+      <div class="opacity-70">checking output folder...</div>
+    {:else if inspectError}
       <div class="text-red-400">{inspectError}</div>
     {:else if inspected}
       <div class="opacity-80">Will write {outputs.length} file(s): {outputs.join(', ')}</div>

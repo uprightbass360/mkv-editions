@@ -124,6 +124,22 @@ describe('runBuild', () => {
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.error).toContain('ENOENT')
   })
+
+  it('passes --fast to gen when qpfile is off, and omits it when qpfile is on', async () => {
+    const off = outdirWith(SAMPLE_SH)
+    let offArgs: string[] = []
+    await runBuild({ version: 1, qpfile: false }, off, false, () => {}, () => {}, {
+      spawnFn: ((_c: string, args: string[]) => { if (!offArgs.length) offArgs = args; return fakeChild({ code: 0 }) }) as any,
+    })
+    expect(offArgs).toContain('--fast')
+
+    const on = outdirWith(SAMPLE_SH)
+    let onArgs: string[] = []
+    await runBuild({ version: 1, qpfile: true }, on, false, () => {}, () => {}, {
+      spawnFn: ((_c: string, args: string[]) => { if (!onArgs.length) onArgs = args; return fakeChild({ code: 0 }) }) as any,
+    })
+    expect(onArgs).not.toContain('--fast')
+  })
 })
 
 describe('inspectBuild', () => {
@@ -146,5 +162,18 @@ describe('inspectBuild', () => {
     const spawnFn: any = () => fakeChild({ stderr: ['bad project\n'], code: 1 })
     const res = await inspectBuild({ version: 1 }, outdir, { spawnFn })
     expect(res).toEqual({ ok: false, error: 'bad project' })
+  })
+
+  it('always runs gen-editions with --fast (inspect never frame-counts)', async () => {
+    const outdir = mktmp('mkved-realout-')
+    let genArgs: string[] = []
+    const spawnFn: any = (_cmd: string, args: string[]) => {
+      genArgs = args
+      writeFileSync(join(args[3], 'build.sh'), SAMPLE_SH)
+      return fakeChild({ code: 0 })
+    }
+    const res = await inspectBuild({ version: 1 }, outdir, { spawnFn })
+    expect(res.ok).toBe(true)
+    expect(genArgs).toContain('--fast')
   })
 })
