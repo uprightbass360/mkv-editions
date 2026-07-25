@@ -6,7 +6,9 @@ function mount(overrides: Record<string, unknown> = {}) {
   const props = {
     scanning: false, canSave: false,
     onOpenFolder: vi.fn(), onOpenZip: vi.fn(), onOpenIso: vi.fn(),
-    onOpenProject: vi.fn(), onSaveProject: vi.fn(), ...overrides,
+    onOpenProject: vi.fn(), onSaveProject: vi.fn(),
+    onUndo: vi.fn(), onRedo: vi.fn(), onRevert: vi.fn(),
+    canUndo: false, canRedo: false, canRevert: false, ...overrides,
   }
   render(FileMenu, props)
   return props
@@ -50,5 +52,19 @@ describe('FileMenu', () => {
     expect(screen.getByText('Open folder...')).toBeInTheDocument()
     await fireEvent.click(document.body)
     expect(screen.queryByText('Open folder...')).toBeNull()
+  })
+  it('shows Undo/Redo/Revert disabled when their flags are false', async () => {
+    mount()
+    await fireEvent.click(screen.getByText('File'))
+    expect((screen.getByText('Undo') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByText('Redo') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByText('Revert') as HTMLButtonElement).disabled).toBe(true)
+  })
+  it('fires onUndo when enabled and closes the menu', async () => {
+    const props = mount({ canUndo: true })
+    await fireEvent.click(screen.getByText('File'))
+    await fireEvent.click(screen.getByText('Undo'))
+    expect(props.onUndo).toHaveBeenCalled()
+    expect(screen.queryByText('Redo')).toBeNull()
   })
 })

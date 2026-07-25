@@ -1,5 +1,6 @@
 <script lang="ts">
-  let { scanning, canSave, onOpenFolder, onOpenZip, onOpenIso, onOpenProject, onSaveProject }: {
+  let { scanning, canSave, onOpenFolder, onOpenZip, onOpenIso, onOpenProject, onSaveProject,
+    onUndo, onRedo, onRevert, canUndo, canRedo, canRevert }: {
     scanning: boolean
     canSave: boolean
     onOpenFolder: () => void
@@ -7,6 +8,12 @@
     onOpenIso: () => void
     onOpenProject: () => void
     onSaveProject: () => void
+    onUndo: () => void
+    onRedo: () => void
+    onRevert: () => void
+    canUndo: boolean
+    canRedo: boolean
+    canRevert: boolean
   } = $props()
 
   let open = $state(false)
@@ -31,6 +38,10 @@
   <button class="rounded border border-primary-border/25 px-3 py-1 hover:bg-primary/10" onclick={(e) => { e.stopPropagation(); open = !open }}>File</button>
   {#if open}
     <div class="absolute left-0 z-40 mt-1 flex w-44 flex-col rounded border border-primary-border/25 bg-surface py-1 text-sm shadow-lg dark:bg-surface-dark" role="menu">
+      <button class="px-3 py-1 text-left hover:bg-primary/10 disabled:opacity-50" role="menuitem" disabled={!canUndo} onclick={() => choose(onUndo)}>Undo</button>
+      <button class="px-3 py-1 text-left hover:bg-primary/10 disabled:opacity-50" role="menuitem" disabled={!canRedo} onclick={() => choose(onRedo)}>Redo</button>
+      <button class="px-3 py-1 text-left hover:bg-primary/10 disabled:opacity-50" role="menuitem" disabled={!canRevert} onclick={() => choose(onRevert)}>Revert</button>
+      <div class="my-1 border-t border-primary-border/20"></div>
       <button class="px-3 py-1 text-left hover:bg-primary/10 disabled:opacity-50" role="menuitem" disabled={scanning} onclick={() => choose(onOpenFolder)}>Open folder...</button>
       <button class="px-3 py-1 text-left hover:bg-primary/10 disabled:opacity-50" role="menuitem" disabled={scanning} onclick={() => choose(onOpenZip)}>Open ZIP...</button>
       <button class="px-3 py-1 text-left hover:bg-primary/10" role="menuitem" onclick={() => choose(onOpenIso)}>Open ISO...</button>
