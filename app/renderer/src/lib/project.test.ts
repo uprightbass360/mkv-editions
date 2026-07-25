@@ -127,6 +127,15 @@ describe('track selection', () => {
     expect(j.tracks).toEqual(p.tracks)
     expect(fromMkvedproj(j).tracks).toEqual(p.tracks)
   })
+  it('toMkvedproj deep-copies tracks so a live $state proxy cannot leak over IPC', () => {
+    const p = toggleSlot(proj(), 'audio:spa:ac3:1', ALL)
+    const j = toMkvedproj(p) as any
+    expect(j.tracks).toEqual(p.tracks)
+    expect(j.tracks).not.toBe(p.tracks) // fresh array
+    expect(j.tracks[0]).not.toBe(p.tracks[0]) // fresh element objects
+    // the whole payload must be structured-cloneable (what Electron IPC does)
+    expect(() => structuredClone(j)).not.toThrow()
+  })
 })
 
 describe('missingKeptSlots', () => {

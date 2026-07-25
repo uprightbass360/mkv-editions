@@ -59,7 +59,10 @@ export function toMkvedproj(p: Project): object {
     version: 1, bdmv: p.bdmv, title: p.title, mode: p.mode,
     preserve_chapters: p.preserve_chapters, qpfile: p.qpfile,
     editions: p.editions.map((e) => ({ name: e.name, clips: [...e.clips] })),
-    tracks: p.tracks,
+    // Deep-copy to plain objects: p.tracks is a live Svelte $state proxy at
+    // runtime, and a proxy cannot be structured-cloned over Electron IPC
+    // ("An object could not be cloned").
+    tracks: p.tracks.map((t) => ({ ...t })),
   }
 }
 export function hasBuildableEdition(p: Project): boolean {
