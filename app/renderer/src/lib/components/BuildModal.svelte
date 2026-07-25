@@ -19,6 +19,13 @@
   let percent = $state(0)
   let log = $state('')
   let result = $state('')
+  let logEl = $state<HTMLPreElement | undefined>()
+
+  // Keep the log scrolled to the live tail as build output streams in.
+  $effect(() => {
+    log
+    if (logEl) logEl.scrollTop = logEl.scrollHeight
+  })
 
   let buildable = $derived(hasBuildableEdition(project))
   let startable = $derived(
@@ -115,10 +122,13 @@
     {/if}
 
     {#if running || result || log}
-      <div class="h-2 w-full overflow-hidden rounded bg-page dark:bg-page-dark">
-        <div class="h-full bg-primary" style="width: {percent}%"></div>
+      <div class="flex items-center gap-2">
+        <div class="h-2 flex-1 overflow-hidden rounded bg-page dark:bg-page-dark">
+          <div class="h-full bg-primary transition-[width]" style="width: {percent}%"></div>
+        </div>
+        <span class="w-14 text-right text-xs tabular-nums opacity-70">{running ? `${percent}%` : ''}</span>
       </div>
-      <pre class="h-40 overflow-auto rounded border border-primary-border/20 bg-page p-1 text-xs dark:bg-page-dark">{log}</pre>
+      <pre bind:this={logEl} class="h-40 overflow-auto rounded border border-primary-border/20 bg-page p-1 text-xs dark:bg-page-dark">{log}</pre>
       {#if result}<div class="font-medium">{result}</div>{/if}
     {/if}
 

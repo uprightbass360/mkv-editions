@@ -92,6 +92,19 @@ describe('runBuild', () => {
     expect(calls.length).toBe(2)
   })
 
+  it('streams carriage-return progress lines to the log (mkvmerge uses CR)', async () => {
+    const dir = outdirWith(SAMPLE_SH)
+    let n = 0
+    const spawnFn: any = () => {
+      n++
+      return n === 1 ? fakeChild({ code: 0 }) : fakeChild({ stdout: ['Muxing\rProgress: 10%\rProgress: 20%\r'], code: 0 })
+    }
+    const logs: string[] = []
+    await runBuild({ version: 1 }, dir, false, () => {}, (l) => logs.push(l), { spawnFn })
+    expect(logs).toContain('Muxing')
+    expect(logs).toContain('Progress: 20%')
+  })
+
   it('refuses when a target exists and overwrite is false, without running build.sh', async () => {
     const dir = outdirWith(SAMPLE_SH, ['Movie.mkv'])
     let n = 0

@@ -67,13 +67,17 @@ function spawnOnce(
   })
 }
 
-/** Emit each complete newline-terminated line from buf+chunk; return the remainder. */
+/** Emit each complete line from buf+chunk, breaking on \n OR \r (mkvmerge
+ * reports progress as "Progress: NN%\r" with no newline, so \r-only output
+ * would otherwise never stream). Empty segments (e.g. the \n of a \r\n) are
+ * skipped. Returns the unterminated remainder. */
 function emitLines(buf: string, chunk: string, onLine: (line: string) => void): string {
   buf += chunk
-  let nl: number
-  while ((nl = buf.indexOf('\n')) >= 0) {
-    onLine(buf.slice(0, nl))
-    buf = buf.slice(nl + 1)
+  let i: number
+  while ((i = buf.search(/[\r\n]/)) >= 0) {
+    const line = buf.slice(0, i)
+    if (line) onLine(line)
+    buf = buf.slice(i + 1)
   }
   return buf
 }
