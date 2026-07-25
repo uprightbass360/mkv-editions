@@ -91,3 +91,53 @@ def test_build_without_fast_still_writes_qpfile(sample_bd, tmp_path):
     assert r.returncode == 0, r.stderr
     assert (out / "S.T.qpfile.txt").read_text().startswith("96 I\n")
     assert "qpfile(s) written" in r.stdout
+
+
+def test_scan_has_resolution_and_channels(sample_bd):
+    r = run_cli([str(sample_bd), "--scan-json", "--fast"])
+    assert r.returncode == 0, r.stderr
+    doc = json.loads(r.stdout)
+    c = doc["clips"]["00001"]
+    assert c["width"] == 1280 and c["height"] == 720
+    auds = [s for s in c["streams"] if s["kind"] == "audio"]
+    assert auds and all(s["channels"] == 2 for s in auds)
+
+
+def test_scan_has_disc_meta(sample_bd):
+    doc = json.loads(run_cli([str(sample_bd), "--scan-json", "--fast"]).stdout)
+    assert doc["disc"]["title"] == "Sample Disc"
+    assert doc["disc"]["poster"] and doc["disc"]["poster"].endswith(".jpg")
+
+
+def test_scan_disc_meta_absent(tmp_path, ge):
+    # a BDMV with a PLAYLIST but no META -> nulls, no crash
+    import os
+    bd = tmp_path / "BDMV"
+    (bd / "PLAYLIST").mkdir(parents=True)
+    (bd / "STREAM").mkdir()
+    assert ge.disc_meta(str(bd)) == {"title": None, "poster": None}
+
+
+def test_scan_disc_meta_unreadable_xml_yields_nulls(tmp_path, ge):
+    # bdmt_eng.xml is a DIRECTORY, not a file: _ET.parse raises IsADirectoryError
+    # (an OSError, not a ParseError). disc_meta must not crash: it skips the
+    # bad file and returns nulls, same as no META at all.
+    bd = tmp_path / "BDMV"
+    dl = bd / "META" / "DL"
+    dl.mkdir(parents=True)
+    (dl / "bdmt_eng.xml").mkdir()
+    assert ge.disc_meta(str(bd)) == {"title": None, "poster": None}
+
+
+def test_scan_streams_have_slot_ids(sample_bd):
+    doc = json.loads(run_cli([str(sample_bd), "--scan-json", "--fast"]).stdout)
+    streams = doc["clips"]["00001"]["streams"]
+    ids = {sl["id"] for sl in doc["slots"]}
+    saw_av = False
+    for s in streams:
+        if s["kind"] in ("audio", "subtitle"):
+            saw_av = True
+            assert isinstance(s["slot"], str) and s["slot"] in ids
+        else:
+            assert s["slot"] is None
+    assert saw_av

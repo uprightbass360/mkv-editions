@@ -15,7 +15,20 @@ const api = {
     return () => ipcRenderer.removeListener('extract:progress', h)
   },
   saveProject: (json: unknown, title: string) => ipcRenderer.invoke('saveProject', json, title),
-  openProject: () => ipcRenderer.invoke('openProject')
+  openProject: () => ipcRenderer.invoke('openProject'),
+  buildPickFolder: (): Promise<string | null> => ipcRenderer.invoke('buildPickFolder'),
+  buildInspect: (json: unknown, outdir: string) => ipcRenderer.invoke('buildInspect', json, outdir),
+  buildRun: (json: unknown, outdir: string, overwrite: boolean) => ipcRenderer.invoke('buildRun', json, outdir, overwrite),
+  onBuildProgress: (cb: (p: { percent: number }) => void) => {
+    const h = (_e: unknown, p: any) => cb(p)
+    ipcRenderer.on('build:progress', h)
+    return () => ipcRenderer.removeListener('build:progress', h)
+  },
+  onBuildLog: (cb: (p: { line: string }) => void) => {
+    const h = (_e: unknown, p: any) => cb(p)
+    ipcRenderer.on('build:log', h)
+    return () => ipcRenderer.removeListener('build:log', h)
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

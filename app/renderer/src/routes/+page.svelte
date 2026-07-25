@@ -2,18 +2,29 @@
   import ClipLibrary from '$lib/components/ClipLibrary.svelte'
   import PlaylistPicker from '$lib/components/PlaylistPicker.svelte'
   import EditionTracks from '$lib/components/EditionTracks.svelte'
-  import { libraryClips, playlistRows, longestRealPlaylist, unreadableRatio, type DiscModel } from '$lib/model'
+  import DetailPanel from '$lib/components/DetailPanel.svelte'
+  import BuildModal from '$lib/components/BuildModal.svelte'
+  import FileMenu from '$lib/components/FileMenu.svelte'
+  import IsoHelpModal from '$lib/components/IsoHelpModal.svelte'
+  import WelcomeCard from '$lib/components/WelcomeCard.svelte'
+  import { libraryClips, playlistRows, longestRealPlaylist, unreadableRatio, chapterCount, type DiscModel } from '$lib/model'
   import {
-    newProject, addEdition, appendClip, removeClip, renameEdition, importPlaylist,
-    sharedClipIds, toMkvedproj, fromMkvedproj, type Project,
+    newProject, addEdition, appendClip, removeClip, renameEdition, removeEdition, importPlaylist,
+    sharedClipIds, toMkvedproj, fromMkvedproj, hasBuildableEdition, toggleSlot, moveClip, type Project,
   } from '$lib/project'
+  import { emptyHistory, record, undo as undoHistory, redo as redoHistory, type History } from '$lib/history'
 
   let model = $state<DiscModel | null>(null)
   let project = $state<Project | null>(null)
   let progress = $state('')
   let scanning = $state(false)
+  let history = $state<History<Project>>(emptyHistory())
+  let baseline = $state<Project | null>(null)
 
   let showIso = $state(false)
+  let showBuild = $state(false)
+
+  let selected = $state<{ kind: 'clip' | 'playlist'; id: string } | null>(null)
 
   async function scanInto(bdmv: string) {
     let off: (() => void) | undefined
@@ -22,6 +33,7 @@
       const res = await window.api.scanDisc(bdmv)
       if (!res.ok) { progress = 'scan failed: ' + res.error; return }
       model = res.data as DiscModel
+      selected = null
       let p = newProject(model.bdmv)
       const feat = longestRealPlaylist(model)
       if (feat) {
@@ -30,6 +42,8 @@
         progress = `scan complete - suggested feature ${feat}`
       } else progress = 'scan complete'
       project = p
+      baseline = p
+      history = emptyHistory()
     } finally { off?.() }
   }
 
@@ -51,71 +65,148 @@
     const r = await window.api.openProject()
     if (!r || !r.ok) return
     try {
-      project = fromMkvedproj(r.json)
+      const p = fromMkvedproj(r.json)
+      project = p
+      baseline = p
+      history = emptyHistory()
     } catch (e) {
       progress = 'open failed: ' + String((e as Error).message || e)
     }
   }
 
-  function apply(fn: (p: Project) => Project) { if (project) project = fn(project) }
+  async function saveProject() {
+    if (project) await window.api.saveProject(toMkvedproj(project), project.title)
+  }
 
+  function apply(fn: (p: Project) => Project) {
+    if (!project) return
+    history = record(history, project)
+    project = fn(project)
+  }
+  function doUndo() {
+    if (!project) return
+    const r = undoHistory(history, project)
+    if (r) { history = r.history; project = r.value }
+  }
+  function doRedo() {
+    if (!project) return
+    const r = redoHistory(history, project)
+    if (r) { history = r.history; project = r.value }
+  }
+  function doRevert() {
+    if (!baseline || !project) return
+    history = record(history, project)
+    project = baseline
+  }
+
+  $effect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey)) return
+      const el = document.activeElement as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return
+      const k = e.key.toLowerCase()
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); doUndo() }
+      else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); doRedo() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  let canBuild = $derived(!!project && hasBuildableEdition(project))
   let lib = $derived(model ? libraryClips(model) : [])
   let clipInfo = $derived(Object.fromEntries(lib.map((c) => [c.id, c])))
   let rows = $derived(model ? playlistRows(model) : [])
   let shared = $derived(project ? sharedClipIds(project) : new Set<string>())
   let encrypted = $derived(model ? unreadableRatio(model) > 0.5 : false)
+  let clipChapters = $derived(model ? Object.fromEntries(Object.entries(model.clips).map(([id, c]) => [id, chapterCount(c)])) : {})
+  let playlistChapters = $derived(
+    model ? Object.fromEntries(model.playlists.map((p) => [p.file, p.editions[0].clips.reduce((n, c) => n + (model!.clips[c] ? chapterCount(model!.clips[c]) : 0), 0)])) : {},
+  )
+  let canUndo = $derived(history.past.length > 0)
+  let canRedo = $derived(history.future.length > 0)
+  let canRevert = $derived(!!baseline && !!project && JSON.stringify(project) !== JSON.stringify(baseline))
 </script>
 
-<header class="flex items-center gap-2.5 border-b border-primary-border/15 bg-surface px-2 py-1.5 dark:bg-surface-dark">
-  <button class="rounded bg-primary px-3 py-1 font-semibold text-on-primary hover:bg-primary-hover disabled:opacity-50" onclick={() => openAndScan('folder')} disabled={scanning}>Open folder...</button>
-  <button class="rounded bg-primary px-3 py-1 font-semibold text-on-primary hover:bg-primary-hover disabled:opacity-50" onclick={() => openAndScan('zip')} disabled={scanning}>Open ZIP...</button>
-  <button class="rounded border border-primary-border/25 px-2 py-1 hover:bg-primary/10" onclick={() => (showIso = !showIso)}>Open ISO...</button>
-  <button class="rounded border border-primary-border/25 px-2 py-1 hover:bg-primary/10" onclick={pickAndOpen}>Open project...</button>
+<div class="flex h-screen flex-col">
+  <header class="flex items-center gap-2.5 border-b border-primary-border/15 bg-surface px-2 py-1.5 dark:bg-surface-dark">
+    <FileMenu
+      scanning={scanning}
+      canSave={!!project}
+      onOpenFolder={() => openAndScan('folder')}
+      onOpenZip={() => openAndScan('zip')}
+      onOpenIso={() => (showIso = true)}
+      onOpenProject={pickAndOpen}
+      onSaveProject={saveProject}
+      onUndo={doUndo}
+      onRedo={doRedo}
+      onRevert={doRevert}
+      {canUndo}
+      {canRedo}
+      {canRevert}
+    />
+    <span class="ml-auto text-xs opacity-70">{progress}</span>
+  </header>
+
   {#if project}
-    <input class="rounded border border-primary-border/25 bg-surface px-1 dark:bg-surface-dark" bind:value={project.title} />
-    <select class="rounded border border-primary-border/25 bg-surface px-1 dark:bg-surface-dark" bind:value={project.mode}>
-      <option value="flat">flat</option><option value="linked">linked</option><option value="xin1">xin1</option>
-    </select>
-    <label class="text-sm"><input type="checkbox" bind:checked={project.preserve_chapters} /> preserve chapters</label>
-    <button class="rounded border border-primary-border/25 px-2 py-1 hover:bg-primary/10" onclick={async () => { if (project) await window.api.saveProject(toMkvedproj(project), project.title) }}>Save project...</button>
+    <div class="flex items-center gap-2.5 border-b border-primary-border/15 bg-surface px-2 py-1 dark:bg-surface-dark">
+      {#if model?.disc.title}<span class="text-sm font-semibold opacity-90">{model.disc.title}</span>{/if}
+      <button class="rounded bg-primary px-3 py-1 font-semibold text-on-primary hover:bg-primary-hover disabled:opacity-50" onclick={() => (showBuild = true)} disabled={!canBuild}>Build...</button>
+    </div>
   {/if}
-  <span class="ml-auto text-xs opacity-70">{progress}</span>
-</header>
+
+  {#if encrypted}
+    <div class="shrink-0 border-b border-amber-600 bg-amber-900/40 p-2 text-xs">
+      Most clips are unreadable - this image may be AACS-encrypted or not decrypted.
+    </div>
+  {/if}
+
+  {#if !model && !project}
+    <div class="min-h-0 flex-1"><WelcomeCard /></div>
+  {:else}
+    <div class="flex min-h-0 flex-1 flex-col">
+      <main class="grid min-h-0 flex-1 grid-cols-[220px_1fr_300px] gap-2.5 p-2.5">
+        <section class="flex flex-col overflow-hidden">
+          <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Clips</h3>
+          <ClipLibrary clips={lib} chapters={clipChapters} selectedId={selected?.kind === 'clip' ? selected.id : undefined} onselect={(id) => (selected = { kind: 'clip', id })} />
+        </section>
+        <section class="flex flex-col overflow-hidden">
+          <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Editions</h3>
+          {#if project}
+            <EditionTracks
+              {project} {shared} {clipInfo}
+              onselect={(id) => (selected = { kind: 'clip', id })}
+              onappend={(i, id) => apply((p) => appendClip(p, i, id))}
+              onremove={(i, k) => apply((p) => removeClip(p, i, k))}
+              onrename={(i, name) => apply((p) => renameEdition(p, i, name))}
+              onadd={() => apply((p) => addEdition(p, `Edition ${p.editions.length + 1}`))}
+              ondelete={(i) => apply((p) => removeEdition(p, i))}
+              onmove={(i, from, to) => apply((p) => moveClip(p, i, from, to))}
+            />
+          {/if}
+        </section>
+        <section class="flex flex-col overflow-hidden">
+          <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Playlists</h3>
+          <PlaylistPicker
+            {rows} chapters={playlistChapters}
+            selectedFile={selected?.kind === 'playlist' ? selected.id : undefined}
+            onselect={(file) => (selected = { kind: 'playlist', id: file })}
+            onimport={(file) => { const pl = model?.playlists.find((p) => p.file === file); if (pl) apply((p) => importPlaylist(p, pl)) }}
+          />
+        </section>
+      </main>
+      <div class="h-40 shrink-0">
+        <DetailPanel {model} {selected} {project}
+          ontoggleslot={(slot) => apply((p) => toggleSlot(p, slot, model ? model.slots.map((s) => s.id) : []))}
+        />
+      </div>
+    </div>
+  {/if}
+</div>
+
+{#if showBuild && project}
+  <BuildModal {project} onedit={apply} onclose={() => (showBuild = false)} />
+{/if}
 
 {#if showIso}
-  <div class="border-b border-primary-border/15 bg-surface p-2 text-xs dark:bg-surface-dark">
-    <p>Mount the ISO first, then use "Open folder..." on the mount point:</p>
-    <pre class="mt-1 whitespace-pre-wrap">sudo mount -o loop,ro your-disc.iso /mnt/disc
-# or rootless (Linux desktop):
-udisksctl loop-setup -f your-disc.iso</pre>
-  </div>
+  <IsoHelpModal onclose={() => (showIso = false)} />
 {/if}
-
-{#if encrypted}
-  <div class="border-b border-amber-600 bg-amber-900/40 p-2 text-xs">
-    Most clips are unreadable - this image may be AACS-encrypted or not decrypted.
-  </div>
-{/if}
-
-<main class="grid h-[calc(100vh-52px)] grid-cols-[220px_1fr_300px] gap-2.5 p-2.5">
-  <section class="flex flex-col overflow-hidden"><h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Clips</h3><ClipLibrary clips={lib} /></section>
-  <section class="flex flex-col overflow-hidden">
-    <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Editions</h3>
-    {#if project}
-      <EditionTracks
-        {project} {shared} {clipInfo}
-        onappend={(i, id) => apply((p) => appendClip(p, i, id))}
-        onremove={(i, k) => apply((p) => removeClip(p, i, k))}
-        onrename={(i, name) => apply((p) => renameEdition(p, i, name))}
-        onadd={() => apply((p) => addEdition(p, `Edition ${p.editions.length + 1}`))}
-      />
-    {/if}
-  </section>
-  <section class="flex flex-col overflow-hidden">
-    <h3 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-primary-text dark:text-primary-text-dark">Playlists</h3>
-    <PlaylistPicker {rows} onimport={(file) => {
-      const pl = model?.playlists.find((p) => p.file === file)
-      if (pl) apply((p) => importPlaylist(p, pl))
-    }} />
-  </section>
-</main>

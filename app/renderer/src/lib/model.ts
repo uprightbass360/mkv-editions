@@ -3,7 +3,11 @@ export interface Stream {
   kind: 'video' | 'audio' | 'subtitle' | 'other'
   codec: string
   lang: string | null
+  channels?: number | null
+  slot?: string | null
 }
+
+export interface TrackSel { slot: string; keep: boolean; lang?: string; default?: boolean }
 
 export interface ClipTrack {
   tid: number
@@ -21,6 +25,8 @@ export interface Clip {
   marks_ns: number[]
   streams: Stream[]
   tracks: ClipTrack[]
+  width: number | null
+  height: number | null
 }
 
 export interface PlaylistEdition {
@@ -50,12 +56,15 @@ export interface Warning {
   message: string
 }
 
+export interface Disc { title: string | null; poster_data_url: string | null }
+
 export interface DiscModel {
   bdmv: string
   clips: Record<string, Clip>
   playlists: Playlist[]
   slots: Slot[]
   warnings: Warning[]
+  disc: Disc
 }
 
 export interface LibraryClip { id: string; durNs: number; codec: string; readable: boolean; audioCount: number; subCount: number }
@@ -101,4 +110,27 @@ export function unreadableRatio(m: DiscModel): number {
   if (ids.length === 0) return 0
   const bad = ids.filter((id) => m.clips[id].tracks.length === 0).length
   return bad / ids.length
+}
+
+export function chapterCount(c: Clip): number { return c.marks_ns.length }
+
+export function fmtChannels(n: number | null | undefined): string {
+  if (n == null) return ''
+  if (n === 2) return '2.0'
+  if (n === 6) return '5.1'
+  if (n === 8) return '7.1'
+  return `${n}ch`
+}
+
+export function fmtResolution(w: number | null, h: number | null): string {
+  return w == null || h == null ? '' : `${w}x${h}`
+}
+
+export function clipStreamSummary(c: Clip): string[] {
+  return c.streams
+    .filter((s) => s.kind !== 'video')
+    .map((s) => {
+      const ch = s.kind === 'audio' ? fmtChannels(s.channels) : ''
+      return [s.kind, s.codec, s.lang, ch].filter(Boolean).join(' ')
+    })
 }

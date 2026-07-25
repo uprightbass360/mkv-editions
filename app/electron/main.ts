@@ -4,6 +4,7 @@ import path from 'node:path'
 import { scanDisc } from './scan'
 import { writeProjectFile, readProjectFile } from './project-io'
 import { createOpener, cleanupExtractions } from './disc-input'
+import { inspectBuild, runBuild } from './build'
 
 // Built to CJS by tsup, so __dirname is available natively at runtime.
 const dirname = __dirname
@@ -44,6 +45,15 @@ function registerBuildProtocol() {
   })
 }
 
+function showOpen(opts: Electron.OpenDialogOptions) {
+  const win = BrowserWindow.getFocusedWindow()
+  return win ? dialog.showOpenDialog(win, opts) : dialog.showOpenDialog(opts)
+}
+function showSave(opts: Electron.SaveDialogOptions) {
+  const win = BrowserWindow.getFocusedWindow()
+  return win ? dialog.showSaveDialog(win, opts) : dialog.showSaveDialog(opts)
+}
+
 ipcMain.handle('ping', () => `pong from main @ ${new Date().toISOString()}`)
 
 ipcMain.handle('scan', async (event, bdmv: string) => {
@@ -51,22 +61,35 @@ ipcMain.handle('scan', async (event, bdmv: string) => {
   return scanDisc(bdmv, cacheDir, (p) => event.sender.send('scan:progress', p))
 })
 
-const opener = createOpener({ showOpenDialog: (opts) => dialog.showOpenDialog(opts) })
+const opener = createOpener({ showOpenDialog: showOpen })
 ipcMain.handle('openInput', async (event, kind: 'folder' | 'zip') =>
   opener.openInput(kind, (p) => event.sender.send('extract:progress', p)))
 
 ipcMain.handle('saveProject', async (_e, json: unknown, title: string) => {
-  const r = await dialog.showSaveDialog({ defaultPath: `${title || 'movie'}.mkvedproj` })
+  const r = await showSave({ defaultPath: `${title || 'movie'}.mkvedproj` })
   if (r.canceled || !r.filePath) return { ok: false, error: 'cancelled' }
   try { await writeProjectFile(r.filePath, json); return { ok: true, path: r.filePath } }
   catch (e) { return { ok: false, error: String(e) } }
 })
 ipcMain.handle('openProject', async () => {
-  const r = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: 'mkvedproj', extensions: ['mkvedproj', 'json'] }] })
+  const r = await showOpen({ properties: ['openFile'], filters: [{ name: 'mkvedproj', extensions: ['mkvedproj', 'json'] }] })
   if (r.canceled || r.filePaths.length === 0) return null
   try { return { ok: true, json: await readProjectFile(r.filePaths[0]) } }
   catch (e) { return { ok: false, error: String(e) } }
 })
+
+let lastBuildDir: string | undefined
+ipcMain.handle('buildPickFolder', async () => {
+  const r = await showOpen({ properties: ['openDirectory'], defaultPath: lastBuildDir ?? '/' })
+  if (r.canceled || r.filePaths.length === 0) return null
+  lastBuildDir = r.filePaths[0]
+  return lastBuildDir
+})
+ipcMain.handle('buildInspect', async (_e, json: unknown, outdir: string) => inspectBuild(json, outdir))
+ipcMain.handle('buildRun', async (event, json: unknown, outdir: string, overwrite: boolean) =>
+  runBuild(json, outdir, overwrite,
+    (p) => event.sender.send('build:progress', p),
+    (line) => event.sender.send('build:log', { line })))
 
 function createWindow() {
   const win = new BrowserWindow({

@@ -42,6 +42,7 @@ Requires mkvmerge (+ ffprobe) on PATH. MPLS PlayItem/PlayListMark tables are
 parsed directly (no libbluray/mpls_dump needed); MPLS timestamps are 45 kHz.
 """
 
+import glob as _glob
 import hashlib
 import json
 import os
@@ -50,6 +51,7 @@ import sys
 import shlex
 import subprocess
 import tempfile
+import xml.etree.ElementTree as _ET
 from collections import namedtuple
 from xml.sax.saxutils import escape as xml_escape
 
@@ -206,12 +208,12 @@ def ffprobe_duration_ns(path):
 
 
 def frame_info(path, count=True):
-    """(codec, frames|None, fps_num, fps_den). Container metadata; counts only if needed."""
+    """(codec, frames|None, fps_num, fps_den, width|None, height|None)."""
     def probe(extra):
         return subprocess.check_output(
             ["ffprobe", "-v", "0", "-select_streams", "v:0"] + extra + [path]).decode()
     d = dict(l.split("=", 1) for l in probe(
-        ["-show_entries", "stream=codec_name,r_frame_rate,nb_frames", "-of", "default=nw=1"]
+        ["-show_entries", "stream=codec_name,r_frame_rate,nb_frames,width,height", "-of", "default=nw=1"]
     ).splitlines() if "=" in l)
     rfr = (d.get("r_frame_rate", "0/1").split("/") + ["1"])[:2]
     num, den = int(rfr[0]), int(rfr[1] or 1)
@@ -221,7 +223,21 @@ def frame_info(path, count=True):
             ["-count_frames", "-show_entries", "stream=nb_read_frames", "-of", "default=nw=1"]
         ).splitlines() if "=" in l)
         nbf = d2.get("nb_read_frames", "N/A")
-    return d.get("codec_name", ""), (int(nbf) if nbf.isdigit() else None), num, den
+    w = int(d["width"]) if d.get("width", "").isdigit() else None
+    h = int(d["height"]) if d.get("height", "").isdigit() else None
+    return d.get("codec_name", ""), (int(nbf) if nbf.isdigit() else None), num, den, w, h
+
+
+def audio_channels(path):
+    """Channel count per audio stream, in ffprobe (PMT) order; None where unknown."""
+    out = subprocess.check_output(
+        ["ffprobe", "-v", "0", "-select_streams", "a", "-show_entries",
+         "stream=channels", "-of", "default=nw=1:nk=1", path]).decode()
+    res = []
+    for line in out.splitlines():
+        line = line.strip()
+        res.append(int(line) if line.isdigit() else None)
+    return res
 
 
 def clip_duration_ns(frames, num, den, path):
@@ -251,18 +267,19 @@ def probe_clip(path, fast=False, cache_dir=None):
     if cf and os.path.exists(cf):
         try:
             got = json.load(open(cf))
-            if fast or got["frames"] is not None:
+            if ("width" in got) and (fast or got["frames"] is not None):
                 return got
         except (json.JSONDecodeError, OSError):
             pass  # corrupt/truncated entry (e.g. interrupted write) - re-probe
-    codec, frames, num, den = frame_info(path, count=not fast)
+    codec, frames, num, den, width, height = frame_info(path, count=not fast)
     tracks = [{"tid": t["id"], "type": t["type"],
                "pid": t.get("properties", {}).get("number")}
               for t in json.loads(subprocess.check_output(
                   ["mkvmerge", "-J", path]))["tracks"]]
     got = {"codec": codec, "frames": frames, "fps": [num, den],
            "dur_ns": clip_duration_ns(frames, num, den, path),
-           "tracks": tracks}
+           "width": width, "height": height,
+           "audio_channels": audio_channels(path), "tracks": tracks}
     if cf:
         os.makedirs(cache_dir, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=cache_dir, prefix=key + ".")
@@ -889,6 +906,53 @@ def build_xin1(stream, out_dir, title, editions, clipinfo, preserve, qpfile,
     return "\n".join(lines) + "\n", outfn
 
 
+def streams_with_channels(streams, chans):
+    """Return a copy of the STN streams with `channels` on each audio entry,
+    matched to the ffprobe channel list by audio order."""
+    out, ai = [], 0
+    for s in streams:
+        s = dict(s)
+        if s.get("kind") == "audio":
+            s["channels"] = chans[ai] if ai < len(chans) else None
+            ai += 1
+        out.append(s)
+    return out
+
+
+def streams_with_slots(streams):
+    """Return copies of the streams with the slot id attached (None for
+    video/unknown kinds), using the same ids as compute_slots."""
+    return [dict(s, slot=sid) for sid, s in slot_ids_for_clip(streams)]
+
+
+def disc_meta(bdmv):
+    """Disc title (from BDMV/META/DL/bdmt_*.xml, eng preferred) and the largest
+    image in META/DL as a poster path. Any failure yields nulls (real discs
+    often lack META)."""
+    meta = os.path.join(bdmv, "META", "DL")
+    title = None
+    xmls = sorted(_glob.glob(os.path.join(meta, "bdmt_*.xml")))
+    xmls.sort(key=lambda p: 0 if p.endswith("bdmt_eng.xml") else 1)
+    for xp in xmls:
+        try:
+            root = _ET.parse(xp).getroot()
+            for el in root.iter():
+                if el.tag.rsplit("}", 1)[-1] == "name" and (el.text or "").strip():
+                    title = el.text.strip()
+                    break
+            if title:
+                break
+        except (_ET.ParseError, OSError):
+            continue
+    imgs = [p for p in _glob.glob(os.path.join(meta, "*"))
+            if p.lower().endswith((".jpg", ".jpeg", ".png"))]
+    try:
+        poster = max(imgs, key=os.path.getsize) if imgs else None
+    except OSError:
+        poster = None
+    return {"title": title, "poster": os.path.abspath(poster) if poster else None}
+
+
 def run_scan(args):
     bdmv = args.bdmv
     playlists, cmarks, cstreams, warns = sweep_playlists(bdmv)
@@ -911,8 +975,11 @@ def run_scan(args):
         clips[c] = {"path": os.path.abspath(path), "frames": p["frames"],
                     "fps": p["fps"], "dur_ns": p["dur_ns"],
                     "codec": p["codec"], "exact": p["frames"] is not None,
+                    "width": p["width"], "height": p["height"],
                     "marks_ns": cmarks.get(c, []),
-                    "streams": cstreams.get(c, []), "tracks": p["tracks"]}
+                    "streams": streams_with_slots(
+                        streams_with_channels(cstreams.get(c, []), p["audio_channels"])),
+                    "tracks": p["tracks"]}
     bad = sorted(c for c, d in clips.items() if d["codec"] == "vc1")
     if bad:
         warns.append({"kind": "vc1", "clips": bad,
@@ -923,6 +990,7 @@ def run_scan(args):
                       "playlists": playlists,
                       "slots": compute_slots(
                           {c: clips[c]["streams"] for c in clips}),
+                      "disc": disc_meta(bdmv),
                       "warnings": warns}, indent=2))
 
 

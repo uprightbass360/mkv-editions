@@ -21,4 +21,14 @@ describe('PlaylistPicker', () => {
     await fireEvent.click(screen.getAllByText(/import/i)[0])
     expect(onimport).toHaveBeenCalledWith('00342.mpls')
   })
+  it('shows chapter count, selects on row click, and does not import on row click', async () => {
+    const rows = [{ file: '00342.mpls', angles: 1, itemCount: 1, uniqueCount: 1, durNs: 9700e9, isDecoy: false }]
+    const onselect = vi.fn()
+    const onimport = vi.fn()
+    const { getByText } = render(PlaylistPicker, { rows, chapters: { '00342.mpls': 12 }, onselect, onimport })
+    expect(getByText(/12 ch/)).toBeTruthy()
+    await fireEvent.click(getByText('00342.mpls'))
+    expect(onselect).toHaveBeenCalledWith('00342.mpls')
+    expect(onimport).not.toHaveBeenCalled()
+  })
 })

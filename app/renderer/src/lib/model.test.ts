@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import { libraryClips, playlistRows, longestRealPlaylist, fmtDuration, type DiscModel } from './model'
 import { unreadableRatio } from './model'
+import { chapterCount, fmtChannels, fmtResolution, clipStreamSummary } from './model'
 
 const NS = 1_000_000_000
 function clip(dur: number, tracks = 1, aud = 1, sub = 0) {
   return {
     path: '', frames: null, fps: [24, 1] as [number, number], dur_ns: dur * NS,
-    codec: 'h264', exact: false, marks_ns: [],
+    codec: 'h264', exact: false, marks_ns: [], width: null, height: null,
     streams: [
       { pid: 1, kind: 'video' as const, codec: 'h264', lang: null },
       ...Array.from({ length: aud }, (_, i) => ({ pid: 10 + i, kind: 'audio' as const, codec: 'ac3', lang: 'eng' })),
@@ -27,6 +28,7 @@ const model: DiscModel = {
     { file: '00666.mpls', angles: 1, editions: [{ name: '00666', clips: ['00666'] }] },
   ],
   slots: [], warnings: [],
+  disc: { title: null, poster_data_url: null },
 }
 
 describe('libraryClips', () => {
@@ -73,5 +75,31 @@ describe('unreadableRatio', () => {
   it('is 0 for a healthy disc and 0 for no clips', () => {
     expect(unreadableRatio({ clips: { a: { tracks: [{ tid: 0, type: 'video', pid: 1 }] } } } as any)).toBe(0)
     expect(unreadableRatio({ clips: {} } as any)).toBe(0)
+  })
+})
+
+describe('identification helpers', () => {
+  it('fmtChannels maps common layouts', () => {
+    expect(fmtChannels(2)).toBe('2.0')
+    expect(fmtChannels(6)).toBe('5.1')
+    expect(fmtChannels(8)).toBe('7.1')
+    expect(fmtChannels(1)).toBe('1ch')
+    expect(fmtChannels(null)).toBe('')
+  })
+  it('fmtResolution formats WxH or empty', () => {
+    expect(fmtResolution(1920, 1080)).toBe('1920x1080')
+    expect(fmtResolution(null, 1080)).toBe('')
+  })
+  it('chapterCount and clipStreamSummary read the clip', () => {
+    const clip: any = {
+      marks_ns: [0, 1, 2], width: 1920, height: 1080,
+      streams: [
+        { pid: 1, kind: 'video', codec: 'h264', lang: null },
+        { pid: 2, kind: 'audio', codec: 'ac3', lang: 'eng', channels: 6 },
+        { pid: 3, kind: 'subtitle', codec: 'pgs', lang: 'spa' },
+      ],
+    }
+    expect(chapterCount(clip)).toBe(3)
+    expect(clipStreamSummary(clip)).toEqual(['audio ac3 eng 5.1', 'subtitle pgs spa'])
   })
 })
