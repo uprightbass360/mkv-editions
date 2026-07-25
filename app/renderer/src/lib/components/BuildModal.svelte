@@ -102,7 +102,6 @@
       </select>
     </label>
     <label class="flex items-center gap-2"><input type="checkbox" checked={project.preserve_chapters} onchange={(e) => onedit((p) => ({ ...p, preserve_chapters: (e.target as HTMLInputElement).checked }))} /> preserve chapters</label>
-    <label class="flex items-center gap-2"><input type="checkbox" checked={project.qpfile} onchange={(e) => onedit((p) => ({ ...p, qpfile: (e.target as HTMLInputElement).checked }))} /> qpfile</label>
 
     <div class="flex items-center gap-2">
       <span class="truncate opacity-80">{folder ?? 'No output folder chosen'}</span>

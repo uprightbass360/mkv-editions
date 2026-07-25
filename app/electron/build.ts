@@ -134,11 +134,11 @@ export async function runBuild(
     tmpDir = mkdtempSync(join(tmpdir(), 'mkved-build-'))
     const tmpProject = join(tmpDir, 'project.mkvedproj')
     writeFileSync(tmpProject, JSON.stringify(json))
-    // Frame counting is only needed for qpfile (IDR at clip joins); otherwise
-    // --fast keeps the build from re-reading every clip end-to-end.
-    const genArgs = [cli.script, '--project', tmpProject, outdir]
-    if (!(json as { qpfile?: boolean } | null | undefined)?.qpfile) genArgs.push('--fast')
-    const gen = await spawnOnce(sp, cli.python, genArgs, undefined)
+    // Always --fast: the only thing non-fast adds is frame counting (for
+    // qpfile), and -count_frames decodes every clip end-to-end - minutes to
+    // tens-of-minutes per m2ts on a real disc, i.e. the build appears hung at
+    // 0%. Disc builds cannot afford it, so qpfile is not offered in the app.
+    const gen = await spawnOnce(sp, cli.python, [cli.script, '--project', tmpProject, outdir, '--fast'], undefined)
     if (gen.code !== 0) return { ok: false, error: gen.err.trim() || `gen-editions exited ${gen.code}` }
     let names: string[]
     try { names = expectedOutputs(readFileSync(join(outdir, 'build.sh'), 'utf8')) }

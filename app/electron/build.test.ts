@@ -138,20 +138,15 @@ describe('runBuild', () => {
     if (!res.ok) expect(res.error).toContain('ENOENT')
   })
 
-  it('passes --fast to gen when qpfile is off, and omits it when qpfile is on', async () => {
-    const off = outdirWith(SAMPLE_SH)
-    let offArgs: string[] = []
-    await runBuild({ version: 1, qpfile: false }, off, false, () => {}, () => {}, {
-      spawnFn: ((_c: string, args: string[]) => { if (!offArgs.length) offArgs = args; return fakeChild({ code: 0 }) }) as any,
-    })
-    expect(offArgs).toContain('--fast')
-
-    const on = outdirWith(SAMPLE_SH)
-    let onArgs: string[] = []
-    await runBuild({ version: 1, qpfile: true }, on, false, () => {}, () => {}, {
-      spawnFn: ((_c: string, args: string[]) => { if (!onArgs.length) onArgs = args; return fakeChild({ code: 0 }) }) as any,
-    })
-    expect(onArgs).not.toContain('--fast')
+  it('always passes --fast to gen (frame-counting a disc build is impractical)', async () => {
+    for (const qpfile of [false, true]) {
+      const dir = outdirWith(SAMPLE_SH)
+      let genArgs: string[] = []
+      await runBuild({ version: 1, qpfile }, dir, false, () => {}, () => {}, {
+        spawnFn: ((_c: string, args: string[]) => { if (!genArgs.length) genArgs = args; return fakeChild({ code: 0 }) }) as any,
+      })
+      expect(genArgs).toContain('--fast')
+    }
   })
 })
 
