@@ -2,7 +2,11 @@
   import type { Project } from '$lib/project'
   import { toMkvedproj, hasBuildableEdition, canStartBuild } from '$lib/project'
 
-  let { project, onclose }: { project: Project; onclose: () => void } = $props()
+  let { project, onclose, onedit }: {
+    project: Project
+    onclose: () => void
+    onedit: (fn: (p: Project) => Project) => void
+  } = $props()
 
   let folder = $state<string | null>(null)
   let outputs = $state<string[]>([])
@@ -34,13 +38,16 @@
   async function choose() {
     const f = await window.api.buildPickFolder()
     if (!f) return
-    folder = f
     overwrite = false
-    await inspect()
+    folder = f
   }
 
-  // Re-inspect when a filename-affecting setting changes while a folder is set.
-  function onSettingChange() { if (folder) inspect() }
+  // Re-inspect whenever the output folder or a filename-affecting setting changes.
+  $effect(() => {
+    const _deps = [folder, project.title, project.mode]
+    void _deps
+    if (folder) inspect()
+  })
 
   async function start() {
     if (!folder) return
@@ -69,15 +76,15 @@
     </div>
 
     <label class="flex items-center gap-2">Output name
-      <input class="flex-1 rounded border border-primary-border/25 bg-page px-1 dark:bg-page-dark" bind:value={project.title} oninput={onSettingChange} />
+      <input class="flex-1 rounded border border-primary-border/25 bg-page px-1 dark:bg-page-dark" value={project.title} onchange={(e) => onedit((p) => ({ ...p, title: (e.target as HTMLInputElement).value }))} />
     </label>
     <label class="flex items-center gap-2">Mode
-      <select class="rounded border border-primary-border/25 bg-page px-1 dark:bg-page-dark" bind:value={project.mode} onchange={onSettingChange}>
+      <select class="rounded border border-primary-border/25 bg-page px-1 dark:bg-page-dark" value={project.mode} onchange={(e) => onedit((p) => ({ ...p, mode: (e.target as HTMLSelectElement).value as Project['mode'] }))}>
         <option value="flat">flat</option><option value="linked">linked</option><option value="xin1">xin1</option>
       </select>
     </label>
-    <label class="flex items-center gap-2"><input type="checkbox" bind:checked={project.preserve_chapters} /> preserve chapters</label>
-    <label class="flex items-center gap-2"><input type="checkbox" bind:checked={project.qpfile} /> qpfile</label>
+    <label class="flex items-center gap-2"><input type="checkbox" checked={project.preserve_chapters} onchange={(e) => onedit((p) => ({ ...p, preserve_chapters: (e.target as HTMLInputElement).checked }))} /> preserve chapters</label>
+    <label class="flex items-center gap-2"><input type="checkbox" checked={project.qpfile} onchange={(e) => onedit((p) => ({ ...p, qpfile: (e.target as HTMLInputElement).checked }))} /> qpfile</label>
 
     <div class="flex items-center gap-2">
       <span class="truncate opacity-80">{folder ?? 'No output folder chosen'}</span>

@@ -155,7 +155,7 @@
 </div>
 
 {#if showBuild && project}
-  <BuildModal {project} onclose={() => (showBuild = false)} />
+  <BuildModal {project} onedit={apply} onclose={() => (showBuild = false)} />
 {/if}
 
 {#if showIso}
