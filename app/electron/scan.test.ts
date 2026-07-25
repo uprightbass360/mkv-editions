@@ -1,20 +1,31 @@
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { scanDisc, enrichPoster } from './scan'
 import { resolveCli } from './cli'
+
+const _tmpDirs: string[] = []
+function mktmp(prefix: string): string {
+  const d = mkdtempSync(join(tmpdir(), prefix))
+  _tmpDirs.push(d)
+  return d
+}
+
+afterAll(() => {
+  for (const d of _tmpDirs) { try { rmSync(d, { recursive: true, force: true }) } catch { /* best effort */ } }
+})
 
 let bdmv: string
 let cache: string
 
 beforeAll(() => {
   const { repoRoot, python } = resolveCli()
-  const out = mkdtempSync(join(tmpdir(), 'mkved-sample-'))
+  const out = mktmp('mkved-sample-')
   execFileSync(python, [join(repoRoot, 'samples/make-sample.py'), out], { stdio: 'ignore' })
   bdmv = join(out, 'BDMV')
-  cache = mkdtempSync(join(tmpdir(), 'mkved-cache-'))
+  cache = mktmp('mkved-cache-')
 })
 
 describe('scanDisc', () => {
@@ -39,7 +50,7 @@ describe('scanDisc', () => {
 
 describe('enrichPoster', () => {
   it('replaces a poster path with a base64 data url and drops the path', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'poster-'))
+    const dir = mktmp('poster-')
     const jpg = join(dir, 'p.jpg')
     writeFileSync(jpg, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]))
     const model: any = { disc: { title: 'X', poster: jpg } }

@@ -1,10 +1,21 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterAll } from 'vitest'
 import { expectedOutputs, unshellFirst } from './build'
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { inspectBuild, runBuild } from './build'
+
+const _tmpDirs: string[] = []
+function mktmp(prefix: string): string {
+  const d = mkdtempSync(join(tmpdir(), prefix))
+  _tmpDirs.push(d)
+  return d
+}
+
+afterAll(() => {
+  for (const d of _tmpDirs) { try { rmSync(d, { recursive: true, force: true }) } catch { /* best effort */ } }
+})
 
 function fakeChild(opts: { stdout?: string[]; stderr?: string[]; code?: number; errorMsg?: string }) {
   const child: any = new EventEmitter()
@@ -20,7 +31,7 @@ function fakeChild(opts: { stdout?: string[]; stderr?: string[]; code?: number; 
 }
 
 function outdirWith(buildSh: string, existingTargets: string[] = []): string {
-  const dir = mkdtempSync(join(tmpdir(), 'mkved-out-'))
+  const dir = mktmp('mkved-out-')
   writeFileSync(join(dir, 'build.sh'), buildSh)
   for (const t of existingTargets) writeFileSync(join(dir, t), 'old')
   return dir
@@ -118,7 +129,7 @@ describe('runBuild', () => {
 describe('inspectBuild', () => {
   it('returns outputs and the subset that already exists in outdir', async () => {
     // outdir already has Movie.mkv; the temp gen dir will hold the sample build.sh
-    const outdir = mkdtempSync(join(tmpdir(), 'mkved-realout-'))
+    const outdir = mktmp('mkved-realout-')
     writeFileSync(join(outdir, 'Movie.mkv'), 'old')
     const spawnFn: any = (_cmd: string, args: string[]) => {
       // gen writes build.sh into args[3] (the gen dir); emulate that here
@@ -131,7 +142,7 @@ describe('inspectBuild', () => {
   })
 
   it('returns an error when gen-editions exits nonzero', async () => {
-    const outdir = mkdtempSync(join(tmpdir(), 'mkved-realout-'))
+    const outdir = mktmp('mkved-realout-')
     const spawnFn: any = () => fakeChild({ stderr: ['bad project\n'], code: 1 })
     const res = await inspectBuild({ version: 1 }, outdir, { spawnFn })
     expect(res).toEqual({ ok: false, error: 'bad project' })
