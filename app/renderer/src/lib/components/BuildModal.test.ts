@@ -36,6 +36,15 @@ describe('BuildModal', () => {
     expect(start.disabled).toBe(false)
   })
 
+  it('surfaces an inspect failure instead of leaving Start silently disabled', async () => {
+    ;(window as any).api.buildInspect = vi.fn(async () => { throw new Error('boom') })
+    render(BuildModal, { project: buildable(), onclose: () => {}, onedit: vi.fn() })
+    await fireEvent.click(screen.getByText(/choose/i))
+    expect(await screen.findByText(/inspect failed: boom/i)).toBeInTheDocument()
+    const start = screen.getByRole('button', { name: /^start$/i }) as HTMLButtonElement
+    expect(start.disabled).toBe(true)
+  })
+
   it('calls onclose from the Close button', async () => {
     const onclose = vi.fn()
     render(BuildModal, { project: buildable(), onclose, onedit: vi.fn() })

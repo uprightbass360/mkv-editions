@@ -28,11 +28,18 @@
     if (!folder) return
     inspected = false
     inspectError = ''
-    const res = await window.api.buildInspect(toMkvedproj(project), folder)
-    if (!res.ok) { inspectError = res.error; outputs = []; existing = []; return }
-    outputs = res.outputs
-    existing = res.existing
-    inspected = true
+    try {
+      const res = await window.api.buildInspect(toMkvedproj(project), folder)
+      if (!res.ok) { inspectError = res.error; outputs = []; existing = []; return }
+      outputs = res.outputs
+      existing = res.existing
+      inspected = true
+    } catch (e) {
+      // A rejected invoke (previously left Start silently disabled with no reason).
+      inspectError = 'inspect failed: ' + String((e as Error).message || e)
+      outputs = []
+      existing = []
+    }
   }
 
   async function choose() {
