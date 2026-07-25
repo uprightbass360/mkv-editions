@@ -12,11 +12,14 @@
     newProject, addEdition, appendClip, removeClip, renameEdition, removeEdition, importPlaylist,
     sharedClipIds, toMkvedproj, fromMkvedproj, hasBuildableEdition, toggleSlot, moveClip, type Project,
   } from '$lib/project'
+  import { emptyHistory, record, undo as undoHistory, redo as redoHistory, type History } from '$lib/history'
 
   let model = $state<DiscModel | null>(null)
   let project = $state<Project | null>(null)
   let progress = $state('')
   let scanning = $state(false)
+  let history = $state<History<Project>>(emptyHistory())
+  let baseline = $state<Project | null>(null)
 
   let showIso = $state(false)
   let showBuild = $state(false)
@@ -39,6 +42,8 @@
         progress = `scan complete - suggested feature ${feat}`
       } else progress = 'scan complete'
       project = p
+      baseline = p
+      history = emptyHistory()
     } finally { off?.() }
   }
 
@@ -60,7 +65,10 @@
     const r = await window.api.openProject()
     if (!r || !r.ok) return
     try {
-      project = fromMkvedproj(r.json)
+      const p = fromMkvedproj(r.json)
+      project = p
+      baseline = p
+      history = emptyHistory()
     } catch (e) {
       progress = 'open failed: ' + String((e as Error).message || e)
     }
@@ -70,7 +78,39 @@
     if (project) await window.api.saveProject(toMkvedproj(project), project.title)
   }
 
-  function apply(fn: (p: Project) => Project) { if (project) project = fn(project) }
+  function apply(fn: (p: Project) => Project) {
+    if (!project) return
+    history = record(history, project)
+    project = fn(project)
+  }
+  function doUndo() {
+    if (!project) return
+    const r = undoHistory(history, project)
+    if (r) { history = r.history; project = r.value }
+  }
+  function doRedo() {
+    if (!project) return
+    const r = redoHistory(history, project)
+    if (r) { history = r.history; project = r.value }
+  }
+  function doRevert() {
+    if (!baseline || !project) return
+    history = record(history, project)
+    project = baseline
+  }
+
+  $effect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey)) return
+      const el = document.activeElement as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return
+      const k = e.key.toLowerCase()
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); doUndo() }
+      else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); doRedo() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
 
   let canBuild = $derived(!!project && hasBuildableEdition(project))
   let lib = $derived(model ? libraryClips(model) : [])
@@ -82,6 +122,9 @@
   let playlistChapters = $derived(
     model ? Object.fromEntries(model.playlists.map((p) => [p.file, p.editions[0].clips.reduce((n, c) => n + (model!.clips[c] ? chapterCount(model!.clips[c]) : 0), 0)])) : {},
   )
+  let canUndo = $derived(history.past.length > 0)
+  let canRedo = $derived(history.future.length > 0)
+  let canRevert = $derived(!!baseline && !!project && JSON.stringify(project) !== JSON.stringify(baseline))
 </script>
 
 <div class="flex h-screen flex-col">
@@ -94,6 +137,12 @@
       onOpenIso={() => (showIso = true)}
       onOpenProject={pickAndOpen}
       onSaveProject={saveProject}
+      onUndo={doUndo}
+      onRedo={doRedo}
+      onRevert={doRevert}
+      {canUndo}
+      {canRedo}
+      {canRevert}
     />
     <span class="ml-auto text-xs opacity-70">{progress}</span>
   </header>
