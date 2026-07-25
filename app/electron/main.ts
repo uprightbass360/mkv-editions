@@ -45,13 +45,24 @@ function registerBuildProtocol() {
   })
 }
 
+// The app's single window, captured at creation. Dialogs parent to THIS rather
+// than BrowserWindow.getFocusedWindow(), which returns null on WSLg when a
+// modal-overlay context is up - leaving the dialog unparented and unable to
+// surface ("does not open").
+let mainWindow: BrowserWindow | null = null
+
+function dialogParent(): BrowserWindow | undefined {
+  return mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined
+}
 function showOpen(opts: Electron.OpenDialogOptions) {
-  const win = BrowserWindow.getFocusedWindow()
-  return win ? dialog.showOpenDialog(win, opts) : dialog.showOpenDialog(opts)
+  const win = dialogParent()
+  if (win) { win.focus(); return dialog.showOpenDialog(win, opts) }
+  return dialog.showOpenDialog(opts)
 }
 function showSave(opts: Electron.SaveDialogOptions) {
-  const win = BrowserWindow.getFocusedWindow()
-  return win ? dialog.showSaveDialog(win, opts) : dialog.showSaveDialog(opts)
+  const win = dialogParent()
+  if (win) { win.focus(); return dialog.showSaveDialog(win, opts) }
+  return dialog.showSaveDialog(opts)
 }
 
 ipcMain.handle('ping', () => `pong from main @ ${new Date().toISOString()}`)
@@ -80,10 +91,17 @@ ipcMain.handle('openProject', async () => {
 
 let lastBuildDir: string | undefined
 ipcMain.handle('buildPickFolder', async () => {
-  const r = await showOpen({ properties: ['openDirectory'], defaultPath: lastBuildDir ?? '/' })
-  if (r.canceled || r.filePaths.length === 0) return null
-  lastBuildDir = r.filePaths[0]
-  return lastBuildDir
+  console.log(`[main] buildPickFolder: opening directory dialog (parent=${dialogParent() ? 'window' : 'none'})`)
+  try {
+    const r = await showOpen({ properties: ['openDirectory'], defaultPath: lastBuildDir ?? '/' })
+    console.log(`[main] buildPickFolder: canceled=${r.canceled} paths=${r.filePaths.length}`)
+    if (r.canceled || r.filePaths.length === 0) return null
+    lastBuildDir = r.filePaths[0]
+    return lastBuildDir
+  } catch (e) {
+    console.error('[main] buildPickFolder: dialog threw', e)
+    return null
+  }
 })
 ipcMain.handle('buildInspect', async (_e, json: unknown, outdir: string) => inspectBuild(json, outdir))
 ipcMain.handle('buildRun', async (event, json: unknown, outdir: string, overwrite: boolean) =>
@@ -99,6 +117,8 @@ function createWindow() {
       contextIsolation: true, nodeIntegration: false, sandbox: true
     }
   })
+  mainWindow = win
+  win.on('closed', () => { if (mainWindow === win) mainWindow = null })
   win.webContents.on('console-message', (e) => console.log(`[renderer console] ${e.message}`))
   win.webContents.on('did-finish-load', () => console.log('[main] did-finish-load'))
   win.once('ready-to-show', () => { console.log('[main] ready-to-show'); win.show() })
