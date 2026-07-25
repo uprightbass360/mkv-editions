@@ -103,11 +103,20 @@ ipcMain.handle('buildPickFolder', async () => {
     return null
   }
 })
-ipcMain.handle('buildInspect', async (_e, json: unknown, outdir: string) => inspectBuild(json, outdir))
-ipcMain.handle('buildRun', async (event, json: unknown, outdir: string, overwrite: boolean) =>
-  runBuild(json, outdir, overwrite,
+ipcMain.handle('buildInspect', async (_e, json: unknown, outdir: string) => {
+  console.log(`[main] buildInspect: start outdir=${outdir}`)
+  const r = await inspectBuild(json, outdir)
+  console.log(`[main] buildInspect: ${JSON.stringify(r).slice(0, 400)}`)
+  return r
+})
+ipcMain.handle('buildRun', async (event, json: unknown, outdir: string, overwrite: boolean) => {
+  console.log(`[main] buildRun: start outdir=${outdir} overwrite=${overwrite}`)
+  const r = await runBuild(json, outdir, overwrite,
     (p) => event.sender.send('build:progress', p),
-    (line) => event.sender.send('build:log', { line })))
+    (line) => event.sender.send('build:log', { line }))
+  console.log(`[main] buildRun: done ${JSON.stringify(r).slice(0, 400)}`)
+  return r
+})
 
 function createWindow() {
   const win = new BrowserWindow({
