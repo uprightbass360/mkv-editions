@@ -3,7 +3,8 @@
   "packages": {
     "app": {
       "release-type": "node",
-      "package-name": "mkv-editions"
+      "package-name": "mkv-editions",
+      "include-component-in-tag": false
     }
   }
 }
