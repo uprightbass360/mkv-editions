@@ -73,7 +73,7 @@ Builds on [Xin1Generator][x1] (Sander), [aobikari][ao] (arch1t3cht), TheFluff's
 ["101 things you never knew you could do with Matroska"][tf], and the
 [Matroska chapter spec][mk]. See the reference doc for what each contributed.
 
-A big thank you to **[mihawk90](https://github.com/mihawk90)** for the testing,
+A big thank you to **[mihawk901](https://github.com/mihawk901)** for the testing,
 feedback, and real-disc help that shaped this project.
 
 [x1]: https://code.google.com/archive/p/xin1generator
