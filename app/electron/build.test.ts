@@ -78,7 +78,13 @@ describe('friendlyToolError', () => {
     expect(friendlyToolError('spawn python3 ENOENT')).toMatch(/python3 not found/i)
     expect(friendlyToolError('/bin/sh: mkvmerge: command not found')).toMatch(/mkvtoolnix/i)
     expect(friendlyToolError('ffprobe: not found')).toMatch(/ffmpeg/i)
+    expect(friendlyToolError("[Errno 2] No such file or directory: 'ffprobe'")).toMatch(/ffmpeg/i)
     expect(friendlyToolError('some unrelated failure')).toBe('some unrelated failure')
+  })
+
+  it('does not misfire on a real tool error that merely mentions "not found"', () => {
+    const real = 'mkvmerge: error: track 3 not found in source file'
+    expect(friendlyToolError(real)).toBe(real)
   })
 })
 

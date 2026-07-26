@@ -42,8 +42,14 @@ export function expectedOutputs(buildSh: string): string[] {
  * tool never reads as a hang. Unknown errors pass through unchanged. */
 export function friendlyToolError(raw: string): string {
   const s = raw.toLowerCase()
+  // Match the tool name ADJACENT to a missing-command marker, not merely
+  // co-occurring: a real tool error like "mkvmerge: track not found" must NOT
+  // be mistaken for the tool being absent.
   const missing = (name: string) =>
-    s.includes(name) && (s.includes('enoent') || s.includes('not found') || s.includes('command not found'))
+    s.includes(`spawn ${name} enoent`) ||          // Node spawn: tool not on PATH
+    s.includes(`${name}: not found`) ||            // sh/dash missing command
+    s.includes(`${name}: command not found`) ||    // bash missing command
+    s.includes(`no such file or directory: '${name}'`) // Python FileNotFoundError
   if (missing('python3')) return 'python3 not found - install Python 3 and ensure it is on PATH'
   if (missing('mkvmerge')) return 'mkvmerge not found - install MKVToolNix'
   if (missing('ffprobe')) return 'ffprobe not found - install FFmpeg'
