@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { libraryClips, playlistRows, longestRealPlaylist, fmtDuration, type DiscModel } from './model'
 import { unreadableRatio } from './model'
 import { chapterCount, fmtChannels, fmtResolution, clipStreamSummary } from './model'
+import { detectCuts, playlistRuntimeNs } from './model'
 
 const NS = 1_000_000_000
 function clip(dur: number, tracks = 1, aud = 1, sub = 0) {
@@ -101,5 +102,52 @@ describe('identification helpers', () => {
     }
     expect(chapterCount(clip)).toBe(3)
     expect(clipStreamSummary(clip)).toEqual(['audio ac3 eng 5.1', 'subtitle pgs spa'])
+  })
+})
+
+const nmin = (m: number) => m * 60 * 1_000_000_000
+function mk(clipMins: Record<string, number>, pls: { file: string; clips: string[]; angles?: number }[]): any {
+  const clips: any = {}
+  for (const [id, mm] of Object.entries(clipMins)) clips[id] = { dur_ns: nmin(mm) }
+  return { clips, playlists: pls.map((p) => ({ file: p.file, angles: p.angles ?? 1, editions: [{ name: p.file, clips: p.clips }] })) }
+}
+
+describe('detectCuts', () => {
+  it('returns the distinct-length cuts, deduped, shortest-first (Avatar-like)', () => {
+    const m = mk(
+      { ce: 30, cs: 25, ct: 20, cb: 5, cd: 6 },
+      [
+        { file: '00003', clips: ['ce'] }, { file: '00802', clips: ['ce'] }, // Extended + dup
+        { file: '00002', clips: ['cs'] }, // Special Ed
+        { file: '00001', clips: ['ct'] }, // Theatrical
+        { file: '00005', clips: ['ce', 'cs', 'ct', 'ce'] }, // superset, ratio 4/3=1.33 -> excluded
+        { file: '00019', clips: ['cb'] }, // 5min bonus -> below 60% floor
+        { file: '00720', clips: ['cd', 'cd', 'cd'] }, // loop decoy, ratio 3 -> excluded
+      ],
+    )
+    expect(detectCuts(m).map((p) => p.file)).toEqual(['00001', '00002', '00003'])
+  })
+  it('merges same-length 2D/3D into one, keeping the richer (Blade-Runner-like)', () => {
+    const m = mk(
+      { c2d: 40, c3da: 39, c3db: 2, cd: 6 },
+      [
+        { file: '00342', clips: ['c2d'], angles: 1 }, // 2D, 40min
+        { file: '00334', clips: ['c3da', 'c3db'], angles: 2 }, // 3D, 41min, 2 angles
+        { file: '00720', clips: ['cd', 'cd', 'cd'] }, // decoy
+      ],
+    )
+    expect(detectCuts(m).map((p) => p.file)).toEqual(['00334'])
+  })
+  it('returns one for a single-feature disc', () => {
+    const m = mk({ a: 20, d: 6 }, [{ file: '00001', clips: ['a'] }, { file: '00720', clips: ['d', 'd', 'd'] }])
+    expect(detectCuts(m).map((p) => p.file)).toEqual(['00001'])
+  })
+  it('returns [] when there is no linear feature (all decoys)', () => {
+    const m = mk({ d: 6 }, [{ file: '00720', clips: ['d', 'd', 'd', 'd'] }])
+    expect(detectCuts(m)).toEqual([])
+  })
+  it('playlistRuntimeNs sums the clip durations', () => {
+    const m = mk({ a: 10, b: 5 }, [{ file: '00001', clips: ['a', 'b'] }])
+    expect(playlistRuntimeNs(m, m.playlists[0])).toBe(nmin(15))
   })
 })

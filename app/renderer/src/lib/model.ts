@@ -134,3 +134,51 @@ export function clipStreamSummary(c: Clip): string[] {
       return [s.kind, s.codec, s.lang, ch].filter(Boolean).join(' ')
     })
 }
+
+export function playlistRuntimeNs(m: DiscModel, pl: Playlist): number {
+  const cs = pl.editions[0]?.clips ?? []
+  return cs.reduce((s, c) => s + (m.clips[c]?.dur_ns ?? 0), 0)
+}
+
+/** The disc's distinct feature cuts as representative playlists, shortest
+ * first (cap 6). Empty when there is no clear feature - the caller falls back
+ * to longestRealPlaylist. Uses items/clips ratio, a relative length floor,
+ * clip-sequence dedup, and a near-runtime merge; no clip-overlap (a branching
+ * superset overlaps a real cut, so overlap cannot separate them). */
+export function detectCuts(m: DiscModel): Playlist[] {
+  const clipsOf = (p: Playlist) => p.editions[0]?.clips ?? []
+  // 1. linear candidates: near 1:1 items/clips (drops branching supersets + loops)
+  const linear = m.playlists.filter((p) => {
+    const cs = clipsOf(p)
+    return cs.length > 0 && cs.length / new Set(cs).size <= 1.2
+  })
+  if (linear.length === 0) return []
+  // 2. feature-length: >= 60% of the longest candidate
+  const longest = Math.max(...linear.map((p) => playlistRuntimeNs(m, p)))
+  const feature = linear.filter((p) => playlistRuntimeNs(m, p) >= 0.6 * longest)
+  // 3. dedup identical clip sequences (keep the lowest file id)
+  const bySeq = new Map<string, Playlist>()
+  for (const p of feature) {
+    const key = clipsOf(p).join('>')
+    const cur = bySeq.get(key)
+    if (!cur || p.file < cur.file) bySeq.set(key, p)
+  }
+  // 4. merge near-equal runtimes (within 3 min); keep the richer representative
+  const NEAR = 3 * 60 * 1_000_000_000
+  const richer = (a: Playlist, b: Playlist) =>
+    a.angles !== b.angles
+      ? a.angles > b.angles
+      : playlistRuntimeNs(m, a) !== playlistRuntimeNs(m, b)
+        ? playlistRuntimeNs(m, a) > playlistRuntimeNs(m, b)
+        : a.file < b.file
+  const reps: Playlist[] = []
+  for (const p of [...bySeq.values()].sort((a, b) => playlistRuntimeNs(m, b) - playlistRuntimeNs(m, a))) {
+    const d = playlistRuntimeNs(m, p)
+    const gi = reps.findIndex((r) => Math.abs(playlistRuntimeNs(m, r) - d) <= NEAR)
+    if (gi < 0) reps.push(p)
+    else if (richer(p, reps[gi])) reps[gi] = p
+  }
+  // 5. shortest first, cap at 6
+  reps.sort((a, b) => playlistRuntimeNs(m, a) - playlistRuntimeNs(m, b))
+  return reps.slice(0, 6)
+}
