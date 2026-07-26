@@ -1,7 +1,7 @@
 {
   "name": "mkv-editions-app",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
   "repository": { "type": "git", "url": "https://github.com/uprightbass360/mkv-editions.git" },
   "workspaces": [
     "renderer"
