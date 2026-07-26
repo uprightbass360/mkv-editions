@@ -8,7 +8,7 @@ function mount(overrides: Record<string, unknown> = {}) {
     onOpenFolder: vi.fn(), onOpenZip: vi.fn(), onOpenIso: vi.fn(),
     onOpenProject: vi.fn(), onSaveProject: vi.fn(),
     onUndo: vi.fn(), onRedo: vi.fn(), onRevert: vi.fn(),
-    canUndo: false, canRedo: false, canRevert: false, ...overrides,
+    canUndo: false, canRedo: false, canRevert: false, onInspectChapters: vi.fn(), ...overrides,
   }
   render(FileMenu, props)
   return props
@@ -66,5 +66,12 @@ describe('FileMenu', () => {
     await fireEvent.click(screen.getByText('Undo'))
     expect(props.onUndo).toHaveBeenCalled()
     expect(screen.queryByText('Redo')).toBeNull()
+  })
+  it('invokes onInspectChapters from the menu item', async () => {
+    const onInspectChapters = vi.fn()
+    const props = mount({ onInspectChapters })
+    await fireEvent.click(screen.getByText('File'))
+    await fireEvent.click(screen.getByRole('menuitem', { name: /inspect mkv chapters/i }))
+    expect(props.onInspectChapters).toHaveBeenCalled()
   })
 })

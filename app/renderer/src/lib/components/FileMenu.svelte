@@ -1,6 +1,6 @@
 <script lang="ts">
   let { scanning, canSave, onOpenFolder, onOpenZip, onOpenIso, onOpenProject, onSaveProject,
-    onUndo, onRedo, onRevert, canUndo, canRedo, canRevert }: {
+    onUndo, onRedo, onRevert, canUndo, canRedo, canRevert, onInspectChapters }: {
     scanning: boolean
     canSave: boolean
     onOpenFolder: () => void
@@ -14,6 +14,7 @@
     canUndo: boolean
     canRedo: boolean
     canRevert: boolean
+    onInspectChapters: () => void
   } = $props()
 
   let open = $state(false)
@@ -49,6 +50,8 @@
       {#if canSave}
         <button class="px-3 py-1 text-left hover:bg-primary/10" role="menuitem" onclick={() => choose(onSaveProject)}>Save project...</button>
       {/if}
+      <div class="my-1 border-t border-primary-border/20"></div>
+      <button class="px-3 py-1 text-left hover:bg-primary/10" role="menuitem" onclick={() => choose(onInspectChapters)}>Inspect MKV chapters...</button>
     </div>
   {/if}
 </div>

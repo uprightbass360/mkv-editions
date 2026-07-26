@@ -7,6 +7,8 @@
   import FileMenu from '$lib/components/FileMenu.svelte'
   import IsoHelpModal from '$lib/components/IsoHelpModal.svelte'
   import WelcomeCard from '$lib/components/WelcomeCard.svelte'
+  import ChaptersModal from '$lib/components/ChaptersModal.svelte'
+  import type { InspectChaptersResult } from '$lib/chapters'
   import { libraryClips, playlistRows, longestRealPlaylist, unreadableRatio, chapterCount, detectCuts, playlistRuntimeNs, fmtDuration, type DiscModel } from '$lib/model'
   import {
     newProject, addEdition, appendClip, removeClip, renameEdition, removeEdition, importPlaylist, importCut,
@@ -23,6 +25,8 @@
 
   let showIso = $state(false)
   let showBuild = $state(false)
+  let showChapters = $state(false)
+  let chaptersResult = $state<InspectChaptersResult | null>(null)
 
   let selected = $state<{ kind: 'clip' | 'playlist'; id: string } | null>(null)
 
@@ -78,6 +82,21 @@
 
   async function saveProject() {
     if (project) await window.api.saveProject(toMkvedproj(project), project.title)
+  }
+
+  async function inspectChaptersFile(path: string) {
+    chaptersResult = await window.api.chaptersInspect(path)
+    showChapters = true
+  }
+  async function pickAndInspectChapters() {
+    const f = await window.api.chaptersPickFile()
+    if (f) await inspectChaptersFile(f)
+  }
+  // From the build-complete modal: one output opens directly; several (a flat
+  // build writes one file per cut) fall back to the picker, seeded to the output dir.
+  async function viewBuiltChapters(outputs: string[]) {
+    if (outputs.length === 1) await inspectChaptersFile(outputs[0])
+    else await pickAndInspectChapters()
   }
 
   function apply(fn: (p: Project) => Project) {
@@ -145,6 +164,7 @@
       {canUndo}
       {canRedo}
       {canRevert}
+      onInspectChapters={pickAndInspectChapters}
     />
     <span class="ml-auto text-xs opacity-70">{progress}</span>
   </header>
@@ -206,9 +226,13 @@
 </div>
 
 {#if showBuild && project}
-  <BuildModal {project} onedit={apply} onclose={() => (showBuild = false)} />
+  <BuildModal {project} onedit={apply} onclose={() => (showBuild = false)} onviewchapters={viewBuiltChapters} />
 {/if}
 
 {#if showIso}
   <IsoHelpModal onclose={() => (showIso = false)} />
+{/if}
+
+{#if showChapters && chaptersResult}
+  <ChaptersModal result={chaptersResult} onclose={() => (showChapters = false)} />
 {/if}

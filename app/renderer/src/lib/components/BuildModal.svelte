@@ -2,10 +2,11 @@
   import type { Project } from '$lib/project'
   import { toMkvedproj, hasBuildableEdition, canStartBuild } from '$lib/project'
 
-  let { project, onclose, onedit }: {
+  let { project, onclose, onedit, onviewchapters = () => {} }: {
     project: Project
     onclose: () => void
     onedit: (fn: (p: Project) => Project) => void
+    onviewchapters?: (outputs: string[]) => void
   } = $props()
 
   let folder = $state<string | null>(null)
@@ -19,6 +20,7 @@
   let percent = $state(0)
   let log = $state('')
   let result = $state('')
+  let builtOutputs = $state<string[]>([])
   let failed = $derived(result.startsWith('Build failed'))
   let logEl = $state<HTMLPreElement | undefined>()
 
@@ -80,6 +82,7 @@
       offP = window.api.onBuildProgress((p) => { percent = p.percent })
       offL = window.api.onBuildLog((p) => { log += p.line + '\n' })
       const res = await window.api.buildRun(toMkvedproj(project), folder, overwrite)
+      builtOutputs = res.ok ? res.outputs : []
       result = res.ok ? `Built ${res.outputs.length} file(s) in ${folder}` : 'Build failed: ' + res.error
     } catch (e) {
       result = 'Build failed: ' + String((e as Error).message || e)
@@ -146,6 +149,9 @@
         <pre class="h-40 overflow-auto rounded border border-primary-border/20 bg-page p-1 text-xs dark:bg-page-dark">{log}</pre>
       {/if}
       <div class="mt-1 flex justify-end gap-2">
+        {#if !failed}
+          <button class="rounded border border-primary-border/25 px-3 py-1 hover:bg-primary/10" onclick={() => onviewchapters(builtOutputs)}>View chapters</button>
+        {/if}
         <button class="rounded bg-primary px-3 py-1 font-semibold text-on-primary hover:bg-primary-hover" onclick={onclose}>Done</button>
       </div>
     {/if}
