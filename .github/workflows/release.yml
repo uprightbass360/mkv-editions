@@ -9,6 +9,12 @@ on:
         description: The tag to release (vX.Y.Z)
         required: true
         type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The tag to release (vX.Y.Z)
+        required: true
+        type: string
 
 jobs:
   test:
@@ -40,7 +46,10 @@ jobs:
       - name: Build renderer + electron
         run: cd app && npm run build
       - name: Build AppImage
-        run: cd app && npx electron-builder --linux AppImage
+        # --publish never: electron-builder auto-publishes on CI when a publish
+        # config is present, which fails here (no GH_TOKEN on this step). We
+        # build only and attach in the next step via gh.
+        run: cd app && npx electron-builder --linux AppImage --publish never
       - name: Attach AppImage to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
