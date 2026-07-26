@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { parseChaptersXml, tsToNs } from './chapters'
+import { EventEmitter } from 'node:events'
+import { inspectChapters } from './chapters'
 
 const XIN1 = `<?xml version="1.0"?>
 <!-- <!DOCTYPE Chapters SYSTEM "matroskachapters.dtd"> -->
@@ -88,5 +90,39 @@ describe('parseChaptersXml', () => {
 
   it('returns no editions for a chapterless file', () => {
     expect(parseChaptersXml(EMPTY, '/x/none.mkv').editions).toEqual([])
+  })
+})
+
+/** Fake spawn: emits `stdout` then closes with `code`. Captures the call args. */
+function fakeSpawn(stdout: string, code: number, seen?: { cmd?: string; args?: string[] }) {
+  return ((cmd: string, args: string[]) => {
+    if (seen) { seen.cmd = cmd; seen.args = args }
+    const child: any = new EventEmitter()
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    queueMicrotask(() => {
+      if (stdout) child.stdout.emit('data', stdout)
+      child.emit('close', code)
+    })
+    return child
+  }) as any
+}
+
+describe('inspectChapters', () => {
+  it('invokes mkvextract with "<file> chapters -" and parses stdout', async () => {
+    const seen: { cmd?: string; args?: string[] } = {}
+    const xml = `<Chapters><EditionEntry><ChapterAtom>` +
+      `<ChapterTimeStart>00:00:00.000000000</ChapterTimeStart>` +
+      `<ChapterDisplay><ChapterString>Intro</ChapterString></ChapterDisplay>` +
+      `</ChapterAtom></EditionEntry></Chapters>`
+    const r = await inspectChapters('/x/movie.mkv', { spawnFn: fakeSpawn(xml, 0, seen) })
+    expect(seen.cmd).toBe('mkvextract')
+    expect(seen.args).toEqual(['/x/movie.mkv', 'chapters', '-'])
+    expect('editions' in r && r.editions[0].chapters[0].title).toBe('Intro')
+  })
+
+  it('maps a non-zero mkvextract exit to an error object', async () => {
+    const r = await inspectChapters('/x/bad.mkv', { spawnFn: fakeSpawn('', 2) })
+    expect('error' in r).toBe(true)
   })
 })

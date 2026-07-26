@@ -5,6 +5,7 @@ import { scanDisc } from './scan'
 import { writeProjectFile, readProjectFile } from './project-io'
 import { createOpener, cleanupExtractions } from './disc-input'
 import { inspectBuild, runBuild } from './build'
+import { inspectChapters } from './chapters'
 
 // Built to CJS by tsup, so __dirname is available natively at runtime.
 const dirname = __dirname
@@ -117,6 +118,19 @@ ipcMain.handle('buildRun', async (event, json: unknown, outdir: string, overwrit
   console.log(`[main] buildRun: done ${JSON.stringify(r).slice(0, 400)}`)
   return r
 })
+
+let lastChaptersDir: string | undefined
+ipcMain.handle('chaptersPickFile', async () => {
+  const r = await showOpen({
+    properties: ['openFile'],
+    defaultPath: lastChaptersDir ?? lastBuildDir ?? '/',
+    filters: [{ name: 'Matroska', extensions: ['mkv'] }],
+  })
+  if (r.canceled || r.filePaths.length === 0) return null
+  lastChaptersDir = path.dirname(r.filePaths[0])
+  return r.filePaths[0]
+})
+ipcMain.handle('chaptersInspect', async (_e, file: string) => inspectChapters(file))
 
 function createWindow() {
   const win = new BrowserWindow({

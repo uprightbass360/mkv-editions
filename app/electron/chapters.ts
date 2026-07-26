@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process'
+
 export interface ChapterAtom { startNs: number; endNs: number | null; title: string; hidden: boolean }
 export interface ChapterEdition {
   label: string
@@ -71,4 +73,36 @@ export function parseChaptersXml(xml: string, file: string): ChaptersResult {
     }
   })
   return { file, editions }
+}
+
+export type InspectChaptersResult = ChaptersResult | { error: string }
+
+/** Capture a child's full stdout/stderr; resolves { code, out, err } (code -1 on spawn error). */
+function spawnCapture(
+  spawnFn: typeof spawn, cmd: string, args: string[],
+): Promise<{ code: number; out: string; err: string }> {
+  return new Promise((resolve) => {
+    const child = spawnFn(cmd, args, {})
+    let out = ''
+    let err = ''
+    child.stdout?.on('data', (d: any) => { out += d })
+    child.stderr?.on('data', (d: any) => { err += d })
+    child.on('error', (e: any) => resolve({ code: -1, out, err: String(e?.message || e) }))
+    child.on('close', (code: number | null) => resolve({ code: code ?? 0, out, err }))
+  })
+}
+
+/** Run mkvextract on `file` and parse its chapter XML edition-aware. A file with
+ * no chapters yields { editions: [] } (not an error). */
+export async function inspectChapters(
+  file: string, deps: { spawnFn?: typeof spawn } = {},
+): Promise<InspectChaptersResult> {
+  const sp = deps.spawnFn ?? spawn
+  const r = await spawnCapture(sp, 'mkvextract', [file, 'chapters', '-'])
+  if (r.code !== 0) return { error: r.err.trim() || `mkvextract exited ${r.code}` }
+  try {
+    return parseChaptersXml(r.out, file)
+  } catch (e) {
+    return { error: 'could not parse chapters: ' + String((e as Error).message || e) }
+  }
 }

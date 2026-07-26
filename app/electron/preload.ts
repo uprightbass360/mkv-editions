@@ -19,6 +19,8 @@ const api = {
   buildPickFolder: (): Promise<string | null> => ipcRenderer.invoke('buildPickFolder'),
   buildInspect: (json: unknown, outdir: string) => ipcRenderer.invoke('buildInspect', json, outdir),
   buildRun: (json: unknown, outdir: string, overwrite: boolean) => ipcRenderer.invoke('buildRun', json, outdir, overwrite),
+  chaptersPickFile: (): Promise<string | null> => ipcRenderer.invoke('chaptersPickFile'),
+  chaptersInspect: (file: string) => ipcRenderer.invoke('chaptersInspect', file),
   onBuildProgress: (cb: (p: { percent: number }) => void) => {
     const h = (_e: unknown, p: any) => cb(p)
     ipcRenderer.on('build:progress', h)
