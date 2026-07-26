@@ -8,8 +8,9 @@
 #                         the renderer refresh live. Ctrl-C stops both.
 #   ./run-app.sh build    build only, no window
 #
-# Runs from anywhere; resolves the app relative to this script. WSLg-ready
-# (the app's npm scripts already pass --no-sandbox).
+# Runs from anywhere; resolves the app relative to this script. WSLg-ready:
+# it keeps Chromium's sandbox on where the kernel supports it, and only adds
+# --no-sandbox as a fallback where it does not (see sandbox_args below).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,6 +27,28 @@ fi
 if [ ! -f node_modules/electron/path.txt ]; then
   echo "run-app: completing electron install..."
   node node_modules/electron/install.js
+fi
+
+# Chromium's sandbox is mandatory-or-crash: if it cannot initialize, Electron
+# aborts at launch rather than running unsandboxed. It sandboxes fine when the
+# setuid helper is installed root-owned+setuid, OR when the kernel allows
+# unprivileged user namespaces (the namespace sandbox). Only when neither holds
+# (old kernels with userns off, Ubuntu 24.04's AppArmor userns restriction, many
+# containers) must we pass --no-sandbox to launch at all. Echo the flag if so.
+sandbox_args=()
+sandbox_needs_flag() {
+  local cs="node_modules/electron/dist/chrome-sandbox"
+  # setuid sandbox helper installed correctly -> real sandbox works, no flag
+  if [ -u "$cs" ] && [ "$(stat -c %u "$cs" 2>/dev/null)" = 0 ]; then return 1; fi
+  # unprivileged user namespaces disabled/restricted/exhausted -> need the flag
+  [ "$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo 1)" = 0 ] && return 0
+  [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" != 0 ] && return 0
+  [ "$(cat /proc/sys/user/max_user_namespaces 2>/dev/null || echo 1)" = 0 ] && return 0
+  return 1  # namespace sandbox available -> keep the sandbox on
+}
+if sandbox_needs_flag; then
+  sandbox_args+=(--no-sandbox)
+  echo "run-app: kernel cannot sandbox Chromium here, launching with --no-sandbox"
 fi
 
 wait_for_port() {  # $1 = port, wait up to ~30s
@@ -50,7 +73,7 @@ case "$mode" in
     trap 'kill "$rpid" 2>/dev/null || true' EXIT INT TERM
     wait_for_port 5173
     echo "run-app: launching Electron against the dev server (renderer log: /tmp/mkved-dev-renderer.log)"
-    npm run dev:electron
+    npm run dev:electron -- "${sandbox_args[@]}"
     ;;
   build)
     npm run build
@@ -59,7 +82,7 @@ case "$mode" in
   start | "")
     npm run build
     echo "run-app: opening the workbench window..."
-    npm start
+    npm start -- "${sandbox_args[@]}"
     ;;
   *)
     echo "usage: $0 [start|dev|build]" >&2

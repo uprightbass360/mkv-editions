@@ -8,9 +8,9 @@
     "build:electron": "tsup",
     "build:renderer": "npm run build --workspace renderer",
     "build": "npm run build:renderer && npm run build:electron",
-    "start": "electron . --no-sandbox",
+    "start": "electron .",
     "dev:renderer": "npm run dev --workspace renderer -- --port 5173",
-    "dev:electron": "npm run build:electron && cross-env ELECTRON_RENDERER_DEV_URL=http://localhost:5173 electron . --no-sandbox",
+    "dev:electron": "npm run build:electron && cross-env ELECTRON_RENDERER_DEV_URL=http://localhost:5173 electron .",
     "test:electron": "vitest run",
     "test:renderer": "npm run test --workspace renderer",
     "test": "npm run test:electron && npm run test:renderer"
