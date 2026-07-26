@@ -9,7 +9,7 @@ Use it two ways: a Python CLI, or a desktop workbench.
 
 On your `PATH`:
 
-- **python3**, **mkvmerge** (MKVToolNix), **ffprobe** (FFmpeg), **bash** - the scan/build engine.
+- **python3**, **mkvmerge** + **mkvextract** (MKVToolNix), **ffprobe** (FFmpeg), **bash** - the scan/build engine. `mkvextract` also backs the in-app chapter viewer; it ships with MKVToolNix alongside `mkvmerge`.
 - **Node.js + npm** - only for the desktop app.
 - **7z or unzip** - only if you open a disc as a ZIP in the app.
 
