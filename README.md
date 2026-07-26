@@ -79,16 +79,31 @@ Prebuilt Linux **AppImage** builds are attached to each entry on the
 Download it, `chmod +x mkv-editions-*.AppImage`, and run it. `python3`,
 `mkvmerge`, and `ffprobe` must be installed (see Requirements).
 
+## Conventional commits
+
+Releases are automated from [Conventional Commits](https://www.conventionalcommits.org/).
+Because PRs are squash-merged, the **PR title** is the commit that lands on `main`
+and drives versioning, and a CI check requires it to be conventional:
+
+- `feat: ...` - a new feature (minor bump)
+- `fix: ...` - a bug fix (patch bump)
+- `feat!: ...` or a `BREAKING CHANGE:` footer - a breaking change (major bump)
+- `docs:` / `chore:` / `refactor:` / `ci:` / `test:` / `perf:` - no release on their own
+
 ## Cutting a release
 
-Releases are built by GitHub Actions on a version tag:
+Releases are automated by [release-please](https://github.com/googleapis/release-please):
 
-    # bump "version" in app/package.json, commit, then:
-    git tag v0.1.0
-    git push origin v0.1.0
+1. Land PRs with conventional titles.
+2. release-please opens (and keeps updating) a **"chore: release" PR** that bumps
+   `app/package.json` + lockfile and updates `app/CHANGELOG.md`.
+3. Merge that Release PR. That tags `vX.Y.Z`, publishes a GitHub Release with
+   generated notes, and builds + attaches the Linux AppImage.
 
-The tag runs the release workflow, which gates on CI (all suites) and then
-builds and publishes the AppImage to a GitHub Release named for the tag.
+Manual fallback (still supported): bump `app/package.json` version (and
+`cd app && npm install --package-lock-only`), commit, then
+`git tag vX.Y.Z && git push origin vX.Y.Z` - the release workflow builds and
+attaches the AppImage.
 
 ## Credits
 

@@ -3,6 +3,12 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag to release (vX.Y.Z)
+        required: true
+        type: string
 
 jobs:
   test:
@@ -18,19 +24,30 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Resolve tag
+        id: tag
+        run: echo "tag=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
       - name: Verify tag matches package version
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
+          TAG="${{ steps.tag.outputs.tag }}"
           PKG="$(node -p "require('./app/package.json').version")"
-          if [ "$TAG" != "$PKG" ]; then
-            echo "tag v$TAG does not match app/package.json version $PKG" >&2
+          if [ "${TAG#v}" != "$PKG" ]; then
+            echo "tag $TAG does not match app/package.json version $PKG" >&2
             exit 1
           fi
       - name: Install
         run: cd app && npm ci
       - name: Build renderer + electron
         run: cd app && npm run build
-      - name: Package and publish AppImage
-        run: cd app && npx electron-builder --linux AppImage --publish always
+      - name: Build AppImage
+        run: cd app && npx electron-builder --linux AppImage
+      - name: Attach AppImage to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" app/dist/*.AppImage --clobber
+          else
+            gh release create "$TAG" app/dist/*.AppImage --title "$TAG" --generate-notes
+          fi
