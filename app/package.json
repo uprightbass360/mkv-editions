@@ -23,7 +23,7 @@
     "dist": "npm run build && electron-builder"
   },
   "devDependencies": {
-    "cross-env": "7.0.3",
+    "cross-env": "10.1.0",
     "electron": "43.2.0",
     "electron-builder": "^26.15.3",
     "tsup": "8.5.1",
