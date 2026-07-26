@@ -43,6 +43,14 @@ export function importPlaylist(p: Project, pl: Playlist): Project {
   return { ...p, editions: [...p.editions, ...added] }
 }
 
+export function importCut(p: Project, pl: Playlist, baseName: string): Project {
+  const added = pl.editions.map((e, i) => ({
+    name: i === 0 ? baseName : `${baseName} (Angle ${i + 1})`,
+    clips: [...e.clips],
+  }))
+  return { ...p, editions: [...p.editions, ...added] }
+}
+
 export function sharedClipIds(p: Project): Set<string> {
   const per = new Map<string, Set<number>>()
   p.editions.forEach((e, i) => {
