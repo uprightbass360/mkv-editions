@@ -2,7 +2,9 @@
   "name": "mkv-editions-app",
   "private": true,
   "version": "0.0.1",
-  "workspaces": ["renderer"],
+  "workspaces": [
+    "renderer"
+  ],
   "main": "dist-electron/main.js",
   "scripts": {
     "build:electron": "tsup",
@@ -13,13 +15,23 @@
     "dev:electron": "npm run build:electron && cross-env ELECTRON_RENDERER_DEV_URL=http://localhost:5173 electron .",
     "test:electron": "vitest run",
     "test:renderer": "npm run test --workspace renderer",
-    "test": "npm run test:electron && npm run test:renderer"
+    "test": "npm run test:electron && npm run test:renderer",
+    "dist": "npm run build && electron-builder"
   },
   "devDependencies": {
+    "cross-env": "7.0.3",
     "electron": "43.2.0",
+    "electron-builder": "^26.15.3",
     "tsup": "8.5.1",
     "typescript": "6.0.3",
-    "cross-env": "7.0.3",
     "vitest": "4.1.10"
+  },
+  "build": {
+    "appId": "com.mkveditions.workbench",
+    "productName": "mkv-editions",
+    "files": ["dist-electron/**/*", "renderer/build/**/*", "package.json"],
+    "extraResources": [{ "from": "../src/gen-editions.py", "to": "cli/gen-editions.py" }],
+    "linux": { "target": ["AppImage"], "category": "AudioVideo" },
+    "publish": null
   }
 }
