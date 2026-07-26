@@ -4,6 +4,7 @@ import {
   sharedClipIds, toMkvedproj, fromMkvedproj, hasBuildableEdition, canStartBuild,
   isSlotKept, toggleSlot, keptSummary, missingKeptSlots,
 } from './project'
+import { importCut } from './project'
 
 describe('edition ops are immutable and correct', () => {
   it('adds an edition and appends/moves/removes clips without mutating input', () => {
@@ -153,5 +154,22 @@ describe('missingKeptSlots', () => {
     let p: any = { ...newProject('/x'), editions: [{ name: 'A', clips: ['00001', '00002'] }] }
     p = toggleSlot(p, 'audio:eng:ac3:1', ['audio:eng:ac3:1', 'audio:spa:ac3:1'])
     expect(missingKeptSlots(model, p)).toEqual([{ slot: 'audio:spa:ac3:1', missing: ['00002'] }])
+  })
+})
+
+describe('importCut', () => {
+  it('names editions by the base name, preserving angle suffixes', () => {
+    const pl: any = { file: '00334', angles: 2, editions: [
+      { name: '00334', clips: ['a', 'b'] },
+      { name: '00334 (Angle 2)', clips: ['a', 'c'] },
+    ] }
+    const p = importCut(newProject('/x'), pl, '2:43:00')
+    expect(p.editions.map((e) => e.name)).toEqual(['2:43:00', '2:43:00 (Angle 2)'])
+    expect(p.editions.map((e) => e.clips)).toEqual([['a', 'b'], ['a', 'c']])
+  })
+  it('names a single-edition cut with just the base name', () => {
+    const pl: any = { file: '00001', angles: 1, editions: [{ name: '00001', clips: ['a'] }] }
+    const p = importCut(newProject('/x'), pl, '2:20:00')
+    expect(p.editions.map((e) => e.name)).toEqual(['2:20:00'])
   })
 })

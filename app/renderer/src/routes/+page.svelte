@@ -7,9 +7,9 @@
   import FileMenu from '$lib/components/FileMenu.svelte'
   import IsoHelpModal from '$lib/components/IsoHelpModal.svelte'
   import WelcomeCard from '$lib/components/WelcomeCard.svelte'
-  import { libraryClips, playlistRows, longestRealPlaylist, unreadableRatio, chapterCount, type DiscModel } from '$lib/model'
+  import { libraryClips, playlistRows, longestRealPlaylist, unreadableRatio, chapterCount, detectCuts, playlistRuntimeNs, fmtDuration, type DiscModel } from '$lib/model'
   import {
-    newProject, addEdition, appendClip, removeClip, renameEdition, removeEdition, importPlaylist,
+    newProject, addEdition, appendClip, removeClip, renameEdition, removeEdition, importPlaylist, importCut,
     sharedClipIds, toMkvedproj, fromMkvedproj, hasBuildableEdition, toggleSlot, moveClip, type Project,
   } from '$lib/project'
   import { emptyHistory, record, undo as undoHistory, redo as redoHistory, type History } from '$lib/history'
@@ -35,12 +35,14 @@
       model = res.data as DiscModel
       selected = null
       let p = newProject(model.bdmv)
-      const feat = longestRealPlaylist(model)
-      if (feat) {
-        const pl = model.playlists.find((x) => x.file === feat)!
-        p = importPlaylist(p, pl)
-        progress = `scan complete - suggested feature ${feat}`
-      } else progress = 'scan complete'
+      let cuts = detectCuts(model)
+      if (cuts.length === 0) {
+        const feat = longestRealPlaylist(model)
+        const pl = feat ? model.playlists.find((x) => x.file === feat) : undefined
+        if (pl) cuts = [pl]
+      }
+      for (const pl of cuts) p = importCut(p, pl, fmtDuration(playlistRuntimeNs(model, pl)))
+      progress = cuts.length ? `scan complete - ${cuts.length} edition(s)` : 'scan complete'
       project = p
       baseline = p
       history = emptyHistory()
