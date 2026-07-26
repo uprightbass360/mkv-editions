@@ -5,6 +5,8 @@ multi-angle discs) into editioned MKVs from the shared on-disc segments - either
 as one self-contained file per cut, or with the shared video stored just once.
 Use it two ways: a Python CLI, or a desktop workbench.
 
+![The mkv-editions desktop workbench: a scanned Blu-ray with three auto-detected editions, the clip library, and the playlist panel](docs/images/main-view.png)
+
 ## Requirements
 
 On your `PATH`:
