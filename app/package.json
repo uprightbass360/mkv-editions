@@ -1,8 +1,11 @@
 {
   "name": "mkv-editions-app",
   "private": true,
-  "version": "0.1.0",
-  "repository": { "type": "git", "url": "https://github.com/uprightbass360/mkv-editions.git" },
+  "version": "0.1.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/uprightbass360/mkv-editions.git"
+  },
   "workspaces": [
     "renderer"
   ],
@@ -30,9 +33,27 @@
   "build": {
     "appId": "com.mkveditions.workbench",
     "productName": "mkv-editions",
-    "files": ["dist-electron/**/*", "renderer/build/**/*", "package.json"],
-    "extraResources": [{ "from": "../src/gen-editions.py", "to": "cli/gen-editions.py" }],
-    "linux": { "target": ["AppImage"], "category": "AudioVideo" },
-    "publish": { "provider": "github", "owner": "uprightbass360", "repo": "mkv-editions" }
+    "files": [
+      "dist-electron/**/*",
+      "renderer/build/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../src/gen-editions.py",
+        "to": "cli/gen-editions.py"
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "AudioVideo"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "uprightbass360",
+      "repo": "mkv-editions"
+    }
   }
 }
