@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterAll } from 'vitest'
-import { expectedOutputs, unshellFirst } from './build'
+import { expectedOutputs, unshellFirst, friendlyToolError } from './build'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -17,7 +17,7 @@ afterAll(() => {
   for (const d of _tmpDirs) { try { rmSync(d, { recursive: true, force: true }) } catch { /* best effort */ } }
 })
 
-function fakeChild(opts: { stdout?: string[]; stderr?: string[]; code?: number; errorMsg?: string }) {
+function fakeChild(opts: { stdout?: string[]; stderr?: string[]; code?: number; errorMsg?: string; err?: string }) {
   const child: any = new EventEmitter()
   child.stdout = new EventEmitter()
   child.stderr = new EventEmitter()
@@ -25,6 +25,7 @@ function fakeChild(opts: { stdout?: string[]; stderr?: string[]; code?: number; 
     if (opts.errorMsg) { child.emit('error', new Error(opts.errorMsg)); return }
     for (const s of opts.stdout ?? []) child.stdout.emit('data', s)
     for (const s of opts.stderr ?? []) child.stderr.emit('data', s)
+    if (opts.err) child.stderr.emit('data', opts.err)
     child.emit('close', opts.code ?? 0)
   })
   return child
@@ -72,7 +73,33 @@ describe('expectedOutputs', () => {
   })
 })
 
+describe('friendlyToolError', () => {
+  it('maps missing tools to install hints and passes other errors through', () => {
+    expect(friendlyToolError('spawn python3 ENOENT')).toMatch(/python3 not found/i)
+    expect(friendlyToolError('/bin/sh: mkvmerge: command not found')).toMatch(/mkvtoolnix/i)
+    expect(friendlyToolError('ffprobe: not found')).toMatch(/ffmpeg/i)
+    expect(friendlyToolError('some unrelated failure')).toBe('some unrelated failure')
+  })
+})
+
 describe('runBuild', () => {
+  it('surfaces a friendly message when the muxer is missing', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mkved-fte-'))
+    // gen succeeds (writes a build.sh), build spawn fails as if mkvmerge is absent.
+    let call = 0
+    const spawnFn: any = (cmd: string) => {
+      call++
+      // first spawn = gen-editions (python) writes build.sh and exits 0
+      if (call === 1) { writeFileSync(join(dir, 'build.sh'), 'mkvmerge -o out.mkv in.mkv\n'); return fakeChild({ code: 0 }) }
+      // second spawn = the build (bash build.sh) fails with a not-found stderr
+      return fakeChild({ code: 1, err: '/bin/sh: 1: mkvmerge: not found' })
+    }
+    const res = await runBuild({ version: 1 }, dir, true, () => {}, () => {}, { spawnFn })
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.error).toMatch(/mkvtoolnix/i)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('runs build.sh, streams percent + log lines, returns outputs (no collision)', async () => {
     const dir = outdirWith(SAMPLE_SH)
     const calls: string[][] = []
@@ -130,12 +157,12 @@ describe('runBuild', () => {
     expect(res).toEqual({ ok: false, error: 'bad project' })
   })
 
-  it('surfaces a spawn error as an error result', async () => {
+  it('surfaces a spawn error as a friendly missing-tool message', async () => {
     const dir = outdirWith(SAMPLE_SH)
     const spawnFn: any = () => fakeChild({ errorMsg: 'spawn python3 ENOENT' })
     const res = await runBuild({ version: 1 }, dir, false, () => {}, () => {}, { spawnFn })
     expect(res.ok).toBe(false)
-    if (!res.ok) expect(res.error).toContain('ENOENT')
+    if (!res.ok) expect(res.error).toMatch(/python3 not found/i)
   })
 
   it('always passes --fast to gen (frame-counting a disc build is impractical)', async () => {

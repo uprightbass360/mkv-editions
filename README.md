@@ -18,6 +18,11 @@ On your `PATH`:
 You also need a **decrypted BDMV**: rip the disc with MakeMKV in Backup mode to
 get a `BDMV/` folder (containing `PLAYLIST/` and `STREAM/`).
 
+> Running a packaged AppImage: the same tools (`python3`, `mkvmerge`, `ffprobe`)
+> must be on PATH. An AppImage launched from a file manager can have a stripped
+> PATH - if the tools are not in `/usr/bin`, launch it from a terminal or set
+> `MKVED_PYTHON` to a full `python3` path.
+
 ## Quick start - CLI
 
 ```bash
@@ -66,6 +71,24 @@ ordered-chapters + segment-linking technique end to end, every CLI option
 `--scan-json` / `.mkvedproj` JSON contract for frontends, the synthetic-sample
 validation (no disc needed), and the player-support background behind the mode
 table above.
+
+## Releases
+
+Prebuilt Linux **AppImage** builds are attached to each entry on the
+[Releases](https://github.com/uprightbass360/mkv-editions/releases) page.
+Download it, `chmod +x mkv-editions-*.AppImage`, and run it. `python3`,
+`mkvmerge`, and `ffprobe` must be installed (see Requirements).
+
+## Cutting a release
+
+Releases are built by GitHub Actions on a version tag:
+
+    # bump "version" in app/package.json, commit, then:
+    git tag v0.1.0
+    git push origin v0.1.0
+
+The tag runs the release workflow, which gates on CI (all suites) and then
+builds and publishes the AppImage to a GitHub Release named for the tag.
 
 ## Credits
 

@@ -43,3 +43,4 @@ app/renderer/.svelte-kit/
 # vite/vitest write a cache dir here even though deps hoist to app/node_modules/
 app/renderer/node_modules/
 docs/superpowers/
+app/dist/

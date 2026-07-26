@@ -38,6 +38,18 @@ export function expectedOutputs(buildSh: string): string[] {
   return out
 }
 
+/** Map a raw spawn/gen/build error to a human message so a missing system
+ * tool never reads as a hang. Unknown errors pass through unchanged. */
+export function friendlyToolError(raw: string): string {
+  const s = raw.toLowerCase()
+  const missing = (name: string) =>
+    s.includes(name) && (s.includes('enoent') || s.includes('not found') || s.includes('command not found'))
+  if (missing('python3')) return 'python3 not found - install Python 3 and ensure it is on PATH'
+  if (missing('mkvmerge')) return 'mkvmerge not found - install MKVToolNix'
+  if (missing('ffprobe')) return 'ffprobe not found - install FFmpeg'
+  return raw
+}
+
 export interface BuildProgress { percent: number }
 export type BuildResult =
   | { ok: true; outputs: string[] }
@@ -103,7 +115,7 @@ export async function inspectBuild(
     // frame-accurate probing. Without it, gen-editions frame-counts every real
     // m2ts end-to-end (minutes on a mounted disc) and the modal hangs.
     const gen = await spawnOnce(sp, cli.python, [cli.script, '--project', tmpProject, genDir, '--fast'], undefined)
-    if (gen.code !== 0) return { ok: false, error: gen.err.trim() || `gen-editions exited ${gen.code}` }
+    if (gen.code !== 0) return { ok: false, error: friendlyToolError(gen.err.trim() || `gen-editions exited ${gen.code}`) }
     let names: string[]
     try { names = expectedOutputs(readFileSync(join(genDir, 'build.sh'), 'utf8')) }
     catch (e) { return { ok: false, error: 'could not read generated build.sh: ' + String((e as Error).message || e) } }
@@ -139,7 +151,7 @@ export async function runBuild(
     // tens-of-minutes per m2ts on a real disc, i.e. the build appears hung at
     // 0%. Disc builds cannot afford it, so qpfile is not offered in the app.
     const gen = await spawnOnce(sp, cli.python, [cli.script, '--project', tmpProject, outdir, '--fast'], undefined)
-    if (gen.code !== 0) return { ok: false, error: gen.err.trim() || `gen-editions exited ${gen.code}` }
+    if (gen.code !== 0) return { ok: false, error: friendlyToolError(gen.err.trim() || `gen-editions exited ${gen.code}`) }
     let names: string[]
     try { names = expectedOutputs(readFileSync(join(outdir, 'build.sh'), 'utf8')) }
     catch (e) { return { ok: false, error: 'could not read generated build.sh: ' + String((e as Error).message || e) } }
@@ -157,7 +169,7 @@ export async function runBuild(
     )
     if (outLine) onLog(outLine)
     if (errLine) onLog(errLine)
-    if (build.code !== 0) return { ok: false, error: build.err.trim() || `build exited ${build.code}` }
+    if (build.code !== 0) return { ok: false, error: friendlyToolError(build.err.trim() || `build exited ${build.code}`) }
     return { ok: true, outputs: names.map((n) => join(outdir, n)) }
   } catch (e) {
     return { ok: false, error: String((e as Error).message || e) }
