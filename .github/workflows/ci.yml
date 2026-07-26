@@ -16,6 +16,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install pytest
+        run: python3 -m pip install pytest
       - name: Run pytest
         run: python3 -m pytest -q
 
@@ -31,6 +33,6 @@ jobs:
       - name: Test
         run: cd app && npm test
       - name: svelte-check
-        run: cd app && npm run check
+        run: cd app/renderer && npm run check
       - name: Build
         run: cd app && npm run build
