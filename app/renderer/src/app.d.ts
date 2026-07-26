@@ -1,3 +1,5 @@
+import type { InspectChaptersResult } from '$lib/chapters'
+
 declare global {
   namespace App {}
 
@@ -40,6 +42,8 @@ declare global {
     buildRun: (json: unknown, outdir: string, overwrite: boolean) => Promise<BuildResult>
     onBuildProgress: (cb: (p: BuildProgress) => void) => () => void
     onBuildLog: (cb: (p: BuildLog) => void) => () => void
+    chaptersPickFile: () => Promise<string | null>
+    chaptersInspect: (file: string) => Promise<InspectChaptersResult>
   }
 
   interface Window {

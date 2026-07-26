@@ -58,6 +58,20 @@ describe('BuildModal', () => {
     expect(screen.getByRole('button', { name: /done/i })).toBeInTheDocument()
   })
 
+  it('offers View chapters on a successful build and passes the built paths', async () => {
+    ;(window as any).api.buildInspect = vi.fn(async () => ({ ok: true, outputs: ['Movie.mkv'], existing: [] }))
+    ;(window as any).api.buildRun = vi.fn(async () => ({ ok: true, outputs: ['/out/Movie.mkv'] }))
+    const onviewchapters = vi.fn()
+    render(BuildModal, { project: buildable(), onclose: () => {}, onedit: vi.fn(), onviewchapters })
+    await fireEvent.click(screen.getByText(/choose/i))
+    const start = await screen.findByRole('button', { name: /^start$/i })
+    await new Promise((r) => setTimeout(r, 0))
+    await fireEvent.click(start)
+    const view = await screen.findByRole('button', { name: /view chapters/i })
+    await fireEvent.click(view)
+    expect(onviewchapters).toHaveBeenCalledWith(['/out/Movie.mkv'])
+  })
+
   it('calls onclose from the Close button', async () => {
     const onclose = vi.fn()
     render(BuildModal, { project: buildable(), onclose, onedit: vi.fn() })
