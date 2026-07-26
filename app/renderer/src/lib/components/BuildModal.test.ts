@@ -45,6 +45,19 @@ describe('BuildModal', () => {
     expect(start.disabled).toBe(true)
   })
 
+  it('on completion shows the result + Done and hides the editable inputs', async () => {
+    ;(window as any).api.buildInspect = vi.fn(async () => ({ ok: true, outputs: ['Movie.mkv'], existing: [] }))
+    render(BuildModal, { project: buildable(), onclose: () => {}, onedit: vi.fn() })
+    await fireEvent.click(screen.getByText(/choose/i))
+    const start = await screen.findByRole('button', { name: /^start$/i }) as HTMLButtonElement
+    await new Promise((r) => setTimeout(r, 0))
+    await fireEvent.click(start)
+    expect(await screen.findByText(/built 1 file/i)).toBeInTheDocument()
+    expect(screen.queryByDisplayValue('movie')).toBeNull() // output-name input hidden
+    expect(screen.queryByRole('button', { name: /^start$/i })).toBeNull() // Start hidden
+    expect(screen.getByRole('button', { name: /done/i })).toBeInTheDocument()
+  })
+
   it('calls onclose from the Close button', async () => {
     const onclose = vi.fn()
     render(BuildModal, { project: buildable(), onclose, onedit: vi.fn() })
