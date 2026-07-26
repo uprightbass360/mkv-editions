@@ -2,6 +2,7 @@
   "name": "mkv-editions-app",
   "private": true,
   "version": "0.0.1",
+  "repository": { "type": "git", "url": "https://github.com/uprightbass360/mkv-editions.git" },
   "workspaces": [
     "renderer"
   ],
@@ -32,6 +33,6 @@
     "files": ["dist-electron/**/*", "renderer/build/**/*", "package.json"],
     "extraResources": [{ "from": "../src/gen-editions.py", "to": "cli/gen-editions.py" }],
     "linux": { "target": ["AppImage"], "category": "AudioVideo" },
-    "publish": null
+    "publish": { "provider": "github", "owner": "uprightbass360", "repo": "mkv-editions" }
   }
 }
